@@ -2,7 +2,7 @@
 
 Tài liệu này chỉ giữ những insight quan trọng từ quá trình EDA. 
 
-- **Notebook:** [`EDA/`](../EDA/). Mọi notebook chạy trên toàn bộ dữ liệu.
+- **Notebook:** [`EDA/`](../EDA/).
 - **Hình gốc:** [`EDA/figures/`](../EDA/figures/).
 - **Quy ước:**
   - "giờ local" là giờ địa phương theo timezone của toạ độ;

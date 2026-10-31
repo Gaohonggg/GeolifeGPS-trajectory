@@ -1,6 +1,12 @@
-"""Hàm dùng chung cho các notebook EDA Geolife."""
+"""Hàm dùng chung cho các notebook EDA Geolife.
+
+Mọi notebook đọc thẳng từ file .plt gốc và tính toán trong bộ nhớ, không lưu dữ liệu trung gian ra đĩa.
+"""
 from __future__ import annotations
 
+import os
+from concurrent.futures import ProcessPoolExecutor
+from functools import lru_cache
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -9,7 +15,8 @@ import pandas as pd
 import seaborn as sns
 
 ROOT = Path(__file__).resolve().parents[1]
-PROCESSED = ROOT / "data" / "processed"
+RAW = ROOT / "data" / "Geolife_Trajectories" / "Data"
+PLT_COLS = ["lat", "lon", "zero", "alt_ft", "days", "date", "time"]
 FIG_DIR = ROOT / "EDA" / "figures"
 FIG_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -55,16 +62,69 @@ def savefig(name: str) -> None:
     plt.savefig(FIG_DIR / f"{name}.png", bbox_inches="tight", dpi=110)
 
 
+def _parse_user(user_dir: str) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Parse 1 user: các file .plt (bỏ 6 dòng header) + labels.txt; gán mode cho từng điểm."""
+    user_dir = Path(user_dir)
+    user = int(user_dir.name)
+    frames, meta = [], []
+    for plt_file in sorted((user_dir / "Trajectory").glob("*.plt")):
+        df = pd.read_csv(plt_file, skiprows=6, header=None, names=PLT_COLS)
+        meta.append({"user": user, "traj_id": plt_file.stem, "n_points": len(df),
+                     "file_bytes": plt_file.stat().st_size})
+        if df.empty:
+            continue
+        df["ts_utc"] = pd.to_datetime(df["date"] + " " + df["time"], format="%Y-%m-%d %H:%M:%S")
+        df["traj_id"] = plt_file.stem
+        frames.append(df[["traj_id", "lat", "lon", "alt_ft", "zero", "days", "ts_utc"]])
+    pts = pd.concat(frames, ignore_index=True)
+    pts.insert(0, "user", np.int16(user))
+
+    lab_path = user_dir / "labels.txt"
+    if lab_path.exists():
+        lab = pd.read_csv(lab_path, sep="\t")
+        lab.columns = ["start_utc", "end_utc", "mode"]
+        lab["start_utc"] = pd.to_datetime(lab["start_utc"], format="%Y/%m/%d %H:%M:%S")
+        lab["end_utc"] = pd.to_datetime(lab["end_utc"], format="%Y/%m/%d %H:%M:%S")
+        lab.insert(0, "user", np.int16(user))
+        # gán mode cho điểm: khoảng nhãn gần nhất bắt đầu trước điểm và chưa kết thúc
+        pts = pts.sort_values("ts_utc", kind="stable")
+        m = pd.merge_asof(pts[["ts_utc"]].reset_index(), lab.sort_values("start_utc")[["start_utc", "end_utc", "mode"]],
+                          left_on="ts_utc", right_on="start_utc", direction="backward")
+        ok = m["ts_utc"] <= m["end_utc"]
+        pts["mode"] = pd.Series(np.where(ok, m["mode"], None), index=m["index"]).reindex(pts.index)
+        pts = pts.sort_index()
+    else:
+        lab = pd.DataFrame(columns=["user", "start_utc", "end_utc", "mode"])
+        pts["mode"] = None
+    return pts, lab, pd.DataFrame(meta)
+
+
+@lru_cache(maxsize=1)
+def _load_raw() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    users = sorted(str(p) for p in RAW.iterdir() if p.is_dir())
+    with ProcessPoolExecutor(max_workers=os.cpu_count()) as ex:
+        results = list(ex.map(_parse_user, users))
+    pts = pd.concat([r[0] for r in results], ignore_index=True)
+    pts["mode"] = pts["mode"].astype("category")
+    pts["traj_id"] = pts["traj_id"].astype("category")
+    labels = pd.concat([r[1] for r in results if len(r[1])], ignore_index=True)
+    files = pd.concat([r[2] for r in results], ignore_index=True)
+    return pts, labels, files
+
+
 def load_points(columns: list[str] | None = None) -> pd.DataFrame:
-    return pd.read_parquet(PROCESSED / "points.parquet", columns=columns)
+    """Toàn bộ điểm GPS, giữ nguyên thứ tự dòng như trong file gốc."""
+    pts = _load_raw()[0]
+    return (pts[columns] if columns else pts).copy()
 
 
 def load_labels() -> pd.DataFrame:
-    return pd.read_parquet(PROCESSED / "labels.parquet")
+    return _load_raw()[1].copy()
 
 
 def load_files() -> pd.DataFrame:
-    return pd.read_parquet(PROCESSED / "files.parquet")
+    """Metadata từng file .plt: user, traj_id, n_points, file_bytes."""
+    return _load_raw()[2].copy()
 
 
 def haversine(lat1, lon1, lat2, lon2):
@@ -102,3 +162,37 @@ def nearest_city(lat: np.ndarray, lon: np.ndarray, max_km: float = 80.0) -> np.n
 def in_beijing(lat, lon) -> np.ndarray:
     b = BEIJING_BBOX
     return (lat >= b["lat_min"]) & (lat <= b["lat_max"]) & (lon >= b["lon_min"]) & (lon <= b["lon_max"])
+
+
+def add_geo(df: pd.DataFrame, grid_deg: float = 0.05) -> pd.DataFrame:
+    """Thêm tz, utc_offset_h (có DST), ts_local, city, in_beijing theo toạ độ.
+
+    Timezone tính trên lưới grid_deg rồi join về điểm cho nhanh. Điểm có toạ độ ngoài phạm vi nhận tz = "Unknown".
+    """
+    from timezonefinder import TimezoneFinder
+
+    valid = df.lat.between(-90, 90) & df.lon.between(-180, 180)
+    g_lat = (df.lat.where(valid, 0) / grid_deg).round().astype("int32")
+    g_lon = (df.lon.where(valid, 0) / grid_deg).round().astype("int32")
+    grid = pd.DataFrame({"g_lat": g_lat, "g_lon": g_lon})[valid.to_numpy()].drop_duplicates()
+    glat, glon = grid.g_lat.to_numpy() * grid_deg, grid.g_lon.to_numpy() * grid_deg
+    tf = TimezoneFinder()
+    grid["tz"] = [tf.timezone_at(lat=a, lng=o) or "Unknown" for a, o in zip(glat, glon)]
+    grid["city"] = nearest_city(glat, glon, max_km=80)
+    key = pd.MultiIndex.from_arrays([g_lat, g_lon])
+    grid = grid.set_index(["g_lat", "g_lon"])
+    df["tz"] = pd.Categorical(np.where(valid, grid.tz.reindex(key).to_numpy(), "Unknown"))
+    df["city"] = pd.Categorical(np.where(valid, grid.city.reindex(key).to_numpy(), "Other"))
+
+    # UTC offset thật theo từng điểm (xét DST cho America/*, Europe/*...)
+    offset_h = np.full(len(df), np.nan, dtype="float32")
+    for tz, idx in df.groupby("tz", observed=True).indices.items():
+        if tz == "Unknown":
+            continue
+        utc = df.ts_utc.iloc[idx].dt.tz_localize("UTC")
+        local = utc.dt.tz_convert(tz).dt.tz_localize(None)
+        offset_h[idx] = ((local - utc.dt.tz_localize(None)).dt.total_seconds() / 3600).to_numpy()
+    df["utc_offset_h"] = offset_h
+    df["ts_local"] = df.ts_utc + pd.to_timedelta(df.utc_offset_h.fillna(8), unit="h")
+    df["in_beijing"] = in_beijing(df.lat.to_numpy(), df.lon.to_numpy())
+    return df
