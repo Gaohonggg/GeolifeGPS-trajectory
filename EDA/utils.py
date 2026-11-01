@@ -164,27 +164,28 @@ def in_beijing(lat, lon) -> np.ndarray:
     return (lat >= b["lat_min"]) & (lat <= b["lat_max"]) & (lon >= b["lon_min"]) & (lon <= b["lon_max"])
 
 
-def add_geo(df: pd.DataFrame, grid_deg: float = 0.05) -> pd.DataFrame:
-    """Thêm tz, utc_offset_h (có DST), ts_local, city, in_beijing theo toạ độ.
+CHINA_TZ = ["Asia/Shanghai", "Asia/Urumqi", "Asia/Chongqing", "Asia/Harbin", "Asia/Kashgar"]
 
-    Timezone tính trên lưới grid_deg rồi join về điểm cho nhanh. Điểm có toạ độ ngoài phạm vi nhận tz = "Unknown".
-    """
+
+def lookup_tz(lat: np.ndarray, lon: np.ndarray, coord_round: int = 4) -> np.ndarray:
+    """Timezone chính xác (polygon của timezonefinder) cho từng toạ độ, sau khi làm tròn coord_round chữ số (~11 m)."""
     from timezonefinder import TimezoneFinder
 
-    valid = df.lat.between(-90, 90) & df.lon.between(-180, 180)
-    g_lat = (df.lat.where(valid, 0) / grid_deg).round().astype("int32")
-    g_lon = (df.lon.where(valid, 0) / grid_deg).round().astype("int32")
-    grid = pd.DataFrame({"g_lat": g_lat, "g_lon": g_lon})[valid.to_numpy()].drop_duplicates()
-    glat, glon = grid.g_lat.to_numpy() * grid_deg, grid.g_lon.to_numpy() * grid_deg
     tf = TimezoneFinder()
-    grid["tz"] = [tf.timezone_at(lat=a, lng=o) or "Unknown" for a, o in zip(glat, glon)]
-    grid["city"] = nearest_city(glat, glon, max_km=80)
-    key = pd.MultiIndex.from_arrays([g_lat, g_lon])
-    grid = grid.set_index(["g_lat", "g_lon"])
-    df["tz"] = pd.Categorical(np.where(valid, grid.tz.reindex(key).to_numpy(), "Unknown"))
-    df["city"] = pd.Categorical(np.where(valid, grid.city.reindex(key).to_numpy(), "Other"))
+    key = pd.DataFrame({"lat": np.round(lat, coord_round), "lon": np.round(lon, coord_round)})
+    uniq = key.drop_duplicates().reset_index(drop=True)
+    ok = uniq.lat.between(-90, 90) & uniq.lon.between(-180, 180)
+    uniq["tz"] = "Unknown"
+    uniq.loc[ok, "tz"] = [tf.timezone_at(lat=a, lng=o) or "Unknown" for a, o in zip(uniq.lat[ok], uniq.lon[ok])]
+    return key.merge(uniq, on=["lat", "lon"], how="left")["tz"].to_numpy()
 
-    # UTC offset thật theo từng điểm (xét DST cho America/*, Europe/*...)
+
+def add_geo(df: pd.DataFrame, coord_round: int = 4) -> pd.DataFrame:
+    """Thêm tz, utc_offset_h (có DST), ts_local, in_china, city, in_beijing theo toạ độ.
+
+    Timezone tra chính xác cho từng toạ độ duy nhất (xem NB02 mục 2). Toạ độ ngoài phạm vi nhận tz = "Unknown".
+    """
+    df["tz"] = pd.Categorical(lookup_tz(df.lat.to_numpy(), df.lon.to_numpy(), coord_round))
     offset_h = np.full(len(df), np.nan, dtype="float32")
     for tz, idx in df.groupby("tz", observed=True).indices.items():
         if tz == "Unknown":
@@ -192,7 +193,51 @@ def add_geo(df: pd.DataFrame, grid_deg: float = 0.05) -> pd.DataFrame:
         utc = df.ts_utc.iloc[idx].dt.tz_localize("UTC")
         local = utc.dt.tz_convert(tz).dt.tz_localize(None)
         offset_h[idx] = ((local - utc.dt.tz_localize(None)).dt.total_seconds() / 3600).to_numpy()
-    df["utc_offset_h"] = offset_h
-    df["ts_local"] = df.ts_utc + pd.to_timedelta(df.utc_offset_h.fillna(8), unit="h")
+    df["utc_offset_h"] = np.where(np.isnan(offset_h), 8, offset_h).astype("float32")
+    df["ts_local"] = df.ts_utc + pd.to_timedelta(df.utc_offset_h, unit="h")
+    df["in_china"] = df.tz.isin(CHINA_TZ).to_numpy()
+    df["city"] = pd.Categorical(nearest_city_fast(df.lat.to_numpy(), df.lon.to_numpy()))
     df["in_beijing"] = in_beijing(df.lat.to_numpy(), df.lon.to_numpy())
+    return df
+
+
+def nearest_city_fast(lat: np.ndarray, lon: np.ndarray, grid_deg: float = 0.05) -> np.ndarray:
+    """Thành phố tham chiếu gần nhất, tính trên lưới grid_deg (chỉ dùng để mô tả khu vực, không dùng cho giờ local)."""
+    g = pd.DataFrame({"a": np.round(lat / grid_deg).astype("int32"), "o": np.round(lon / grid_deg).astype("int32")})
+    u = g.drop_duplicates().reset_index(drop=True)
+    u["city"] = nearest_city(u.a.to_numpy() * grid_deg, u.o.to_numpy() * grid_deg)
+    return g.merge(u, on=["a", "o"], how="left")["city"].to_numpy()
+
+
+def china_calendar(years=range(2007, 2013)) -> pd.DataFrame:
+    """Lịch chính thức của Trung Quốc: ngày nghỉ lễ và ngày cuối tuần làm bù (thư viện holidays)."""
+    import re
+    from datetime import date
+
+    import holidays
+
+    years = list(years)
+    hol = holidays.China(years=years)
+    days = pd.date_range(f"{min(years)}-01-01", f"{max(years)}-12-31", freq="D")
+    swapped = {date.fromisoformat(m) for name in hol.values() for m in re.findall(r"由 (\d{4}-\d{2}-\d{2}) 调休", name)}
+    d = days.date
+    cal = pd.DataFrame({"date": days, "holiday_name": [hol.get(x) for x in d]})
+    cal["is_holiday"] = np.isin(d, list(hol))
+    cal["is_swapped_workday"] = np.isin(d, list(swapped))
+    cal["is_workday"] = ((days.day_of_week < 5) & ~cal.is_holiday) | cal.is_swapped_workday
+    return cal
+
+
+def add_calendar(df: pd.DataFrame, cal: pd.DataFrame | None = None) -> pd.DataFrame:
+    """Thêm is_workday, is_holiday theo ngày local: lịch chính thức nếu điểm ở Trung Quốc, T2–T6 nếu ở nơi khác."""
+    cal = china_calendar() if cal is None else cal
+    local_date = df.ts_local.dt.normalize()
+    plain = (local_date.dt.day_of_week < 5).to_numpy()
+    c = cal.set_index("date")
+    cn_work = c.is_workday.reindex(local_date).to_numpy()
+    cn_work = np.where(pd.isna(cn_work), plain, cn_work).astype(bool)
+    cn_hol = c.is_holiday.reindex(local_date).fillna(False).to_numpy().astype(bool)
+    in_cn = df.in_china.to_numpy()
+    df["is_workday"] = np.where(in_cn, cn_work, plain)
+    df["is_holiday"] = in_cn & cn_hol
     return df

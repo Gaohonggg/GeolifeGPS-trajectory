@@ -1,0 +1,69 @@
+# Preprocess v_1: làm sạch điểm GPS + chia dev/holdout theo nhóm user.
+# Lý do và bằng chứng của từng ngưỡng: docs/preprocess_v1.md. Số liệu tái lập được bằng
+# preprocess.ipynb (cùng thư mục); "EDA mục n" là mục n của docs/eda_findings.md.
+# Thư mục output của một version là bất biến: đổi tham số -> tạo v_2, không ghi đè v_1.
+
+version: v_1
+seed: 42
+
+paths:
+  raw_dir: data/Geolife_Trajectories/Data
+  out_dir: data/preprocess/v_1
+
+validity:
+  lat_range: [-90, 90]          # 1 điểm lat ngoài khoảng (EDA mục 3)
+  lon_range: [-180, 180]
+  min_year: 2007                # 3 điểm năm 2000 của user 163 là lỗi đồng hồ (EDA mục 3)
+  dedupe_key: [user, ts_utc]    # 2,81% điểm trùng giây; giữ điểm đầu (EDA mục 3)
+
+flight:
+  # File có median tốc độ > ngưỡng bị coi là chuyến bay và bị loại cả file.
+  # Median tốc độ theo file có khoảng trống tự nhiên 250–450 km/h (0 file),
+  # nên mọi ngưỡng trong khoảng này cho cùng kết quả (19 file).
+  traj_median_speed_kmh: 300
+
+spike:
+  # Điểm B là spike nếu A->B và B->C đều > speed_kmh và d(A,C) < return_ratio * d(A,B).
+  speed_kmh: 150
+  return_ratio: 0.3
+  max_iter: 3
+
+corrupted_traj:
+  # Loại cả file khi spike vừa nhiều vừa dày (điều kiện AND).
+  min_spike_ratio: 0.01
+  min_spikes: 10
+
+max_speed:
+  # Sau khi bỏ spike: điểm có tốc độ vào VÀ ra > ngưỡng bị xoá; nhảy một phía chỉ đánh dấu jump_in.
+  speed_kmh: 400
+  max_iter: 3
+
+timezone:
+  coord_round: 4                # ~11 m; tra timezone chính xác cho từng toạ độ duy nhất (EDA mục 7)
+  china_tz: [Asia/Shanghai, Asia/Urumqi, Asia/Chongqing, Asia/Harbin, Asia/Kashgar]
+
+calendar:
+  # Lịch nghỉ lễ + ngày làm bù chính thức của Trung Quốc (thư viện `holidays`,
+  # đã đối chiếu với thông báo NDRC 2008 và lịch 2009, EDA mục 11). Chỉ áp cho điểm thuộc china_tz;
+  # điểm ngoài Trung Quốc dùng T2–T6 là ngày làm việc.
+  source: holidays.China
+  years: [2007, 2008, 2009, 2010, 2011, 2012]
+
+coverage:
+  # Dùng để xếp tier dữ liệu, cùng định nghĩa với EDA mục 12.
+  night_hours: [22, 6]          # khung đêm local; đêm gán cho ngày bắt đầu
+  work_hours: [9, 18]           # khung hành chính local, chỉ tính ngày làm việc
+
+tiers:
+  # A: đủ dữ liệu để đánh giá home/office; B: đánh giá được nhưng độ tin thấp; C: còn lại.
+  # Mốc 3 và 10: EDA mục 23.
+  A: {min_nights: 10, min_workdays: 10}
+  B: {min_nights: 3, min_workdays: 3}
+
+split:
+  # Chia theo nhóm user (component của đồ thị "có file trùng nhau", EDA mục 4), phân tầng theo tier.
+  holdout_frac: 0.3
+  force_dev_largest_group: true
+  manual_eval:
+    max_users: 30
+    max_dup_share: 0.5          # không chọn user có > 50% điểm là bản sao của user khác
