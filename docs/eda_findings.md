@@ -2,7 +2,7 @@
 
 Tài liệu này chỉ giữ những insight quan trọng từ quá trình EDA. 
 
-- **Notebook:** [`EDA/`](../EDA/), từ `01` đến `06`. Mọi notebook đọc thẳng file `.plt` gốc.
+- **Notebook:** [`EDA/`](../EDA/), từ `01` đến `07`. Mọi notebook đọc thẳng file `.plt` gốc.
 - **Hình gốc:** [`EDA/figures/`](../EDA/figures/).
 - **Quy ước:**
   - "giờ local" là giờ địa phương theo timezone chính xác của toạ độ (mục 7);
@@ -455,3 +455,36 @@ Notebook `06`, mục 5. Xét 156 user có home và có giờ hành chính. Offic
 **Insight:**
 - Gần 1/3 user ở home trong phần lớn giờ hành chính: sinh viên ở ký túc xá trong campus, người làm việc ở nhà, hoặc user chỉ bật GPS những ngày không đi làm. Với họ, "place khác home có nhiều giờ hành chính nhất" là một chỗ ghé qua, không phải nơi làm việc.
 - Office ứng viên chỉ có 1–2 ngày làm việc thì cứ 5 user có 1 user cách home hơn 50 km (công tác, du lịch). Từ 3 ngày trở lên, tỉ lệ này giảm xuống 5–8%.
+
+## 25. ST-DBSCAN: eps2 từ 15–30 phút cho cùng home với stay-point ở khoảng 9/10 user; eps2 dưới 10 phút thì bỏ sót các lần dừng được ghi liên tục
+
+Notebook `07`. ST-DBSCAN (Birant & Kut, 2007) coi hai điểm là láng giềng khi cách nhau ≤ eps1 **và** chênh nhau ≤ eps2 về thời gian. Cụm thu được gọi là **episode**. Cách cài đặt:
+- eps1 = 200 m, ngưỡng mật độ 20 phút, max_gap 48 h, lấy theo mục 20 và mục 21.
+- **Mật độ đo bằng thời lượng, không đếm số điểm.** Mỗi điểm mang `w = dt` tới điểm kế tiếp nếu điểm đó nằm trong 200 m và dt ≤ 48 h, ngược lại `w = 0`. Một điểm là lõi khi tổng `w` của các láng giềng ≥ 20 phút. Đếm số điểm thì một lần dừng ghi 1 s/điểm và một lần dừng ghi 5 s/điểm sẽ có mật độ chênh nhau 5 lần (mục 5). Đếm số điểm cũng bỏ qua thời gian nằm trong khoảng không ghi (mục 17).
+- Điểm của cùng user trong cùng ô 10 s được gộp thành một (còn 27,7% số điểm) và cộng dồn `w`, nên tổng thời gian không đổi.
+- Mốc so sánh là stay-point D = 200 m, T = 20 phút, max_gap 48 h: 23.944 stay, 14,2% là mảnh của lần dừng trước, 22,6% là stay giả. Fragment và stay giả đo như mục 20. Home và office ứng viên tìm như mục 19.
+
+![ST-DBSCAN theo eps2](../EDA/figures/07_st_dbscan_eps2.png)
+
+| eps2 | 5' | 10' | 15' | **30'** | 60' | 120' |
+| --- | --- | --- | --- | --- | --- | --- |
+| Số episode | 18.881 | 25.208 | 23.585 | 21.481 | 20.003 | 18.862 |
+| % episode là mảnh của lần dừng trước | 10,9% | 24,6% | 18,1% | **11,3%** | 7,5% | 5,3% |
+| % episode giả | 22,9% | 21,6% | 22,9% | **23,7%** | 23,6% | 24,2% |
+| Home trùng stay-point (≤ 200 m) | 83,0% | 88,7% | 88,7% | **89,9%** | 89,9% | 89,9% |
+| Office ứng viên trùng stay-point | 74,5% | 81,2% | 82,6% | **80,5%** | 81,9% | 81,2% |
+| Thời gian chạy, 182 user | 3 s | 6 s | 8 s | 13 s | 21 s | 34 s |
+
+Thưa hoá thô hơn và điều kiện quay lại sau gap, đo ở eps2 = 15 phút:
+
+| Phương án | Số episode | Tổng giờ | Home trùng phương án 10 s / 200 m |
+| --- | --- | --- | --- |
+| Ô 10 s, quay lại ≤ 200 m | 23.585 | 86.723 | — |
+| Ô 60 s | 23.683 | 86.568 | 95,9% (office 93,3%) |
+| Quay lại ≤ 400 m | 27.657 | 124.023 | 83,6% |
+
+**Insight:**
+- **eps2 và ngưỡng mật độ ràng buộc nhau.** Khi user đứng yên và thiết bị ghi liên tục, láng giềng của một điểm chỉ phủ tối đa 2·eps2 thời gian. Vì vậy eps2 < 10 phút thì một lần dừng ghi liên tục không có điểm lõi nào, chỉ những lần dừng có khoảng không ghi mới thành episode. Ở eps2 = 5 phút, home chỉ trùng stay-point 83%. Ở eps2 = 10 phút, các lần dừng nằm sát ngưỡng bị chẻ vụn (24,6% là mảnh).
+- **Từ 15 phút trở lên, home gần như không đổi.** Home trùng stay-point ở mức 88,7–89,9%, office ứng viên ở mức 80–83%. Tăng eps2 làm các lần dừng bị ngắt quãng ngắn được nối lại (fragment giảm từ 18% xuống 5%), đổi lại tỉ lệ episode giả tăng nhẹ và thời gian chạy tăng gần tuyến tính. Ở eps2 = 30 phút, home lần đầu chạm mức 89,9%, tỉ lệ mảnh (11,3%) thấp hơn stay-point, còn tỉ lệ giả chỉ cao hơn stay-point 1 điểm %.
+- **Khoảng 1/10 user có home khác stay-point dù eps2 lấy giá trị nào.** Một nguyên nhân thấy được là điều kiện quay lại sau gap. Stay-point so mọi điểm với điểm đầu của stay, nên điểm trước gap và điểm sau gap có thể cách nhau tới 400 m. Ví dụ ở notebook: một stay 13 giờ của user 153 có điểm sau gap cách điểm trước gap 329 m, nên ST-DBSCAN không có episode tương ứng. Nới điều kiện lên 400 m thì giữ được những stay như vậy, nhưng tổng giờ lên 124 nghìn, vượt cả stay-point (102 nghìn), tỉ lệ giả tăng và home lệch khỏi stay-point nhiều hơn (81,5%). Điều kiện 200 m giữa hai điểm liên tiếp cũng chính là đơn vị đã đo ở mục 21.
+- **Thưa hoá 60 s làm home đổi ở 4% số user và office ở 7%,** nên ô 10 s an toàn hơn. Ô 10 s đã nhanh: 8–13 s cho cả 182 user.

@@ -7,7 +7,7 @@ Mục tiêu: từ quỹ đạo GPS của bộ [GeoLife Trajectories 1.3](https:/
 | Đường dẫn | Nội dung |
 | --- | --- |
 | `docs/` | Tài liệu, đọc theo thứ tự ở mục dưới |
-| `EDA/` | Notebook EDA `01`–`06`, đọc thẳng file `.plt` gốc. `utils.py` chứa hàm đọc dữ liệu và hàm dùng chung. Hình ở `EDA/figures/` |
+| `EDA/` | Notebook EDA `01`–`07`, đọc thẳng file `.plt` gốc. `utils.py` chứa hàm đọc dữ liệu và hàm dùng chung. Hình ở `EDA/figures/` |
 | `preprocess/v_*/` | Mỗi version preprocess gồm `config.yaml` và `preprocess.ipynb` (toàn bộ code nằm trong notebook) |
 | `data/` | Không commit. `data/Geolife_Trajectories/` là dữ liệu gốc; `data/preprocess/v_*/` là output của từng version |
 
