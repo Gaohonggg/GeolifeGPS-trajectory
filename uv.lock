@@ -292,7 +292,7 @@ wheels = [
 [[package]]
 name = "geolife-trajectory"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "folium" },
     { name = "holidays" },
@@ -309,6 +309,7 @@ dependencies = [
     { name = "seaborn" },
     { name = "timezonefinder" },
     { name = "tqdm" },
+    { name = "tzdata" },
 ]
 
 [package.dev-dependencies]
@@ -336,6 +337,7 @@ requires-dist = [
     { name = "seaborn", specifier = ">=0.13.2" },
     { name = "timezonefinder", specifier = ">=9.2.0" },
     { name = "tqdm", specifier = ">=4.70.1" },
+    { name = "tzdata", specifier = ">=2026.6" },
 ]
 
 [package.metadata.requires-dev]
