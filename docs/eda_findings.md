@@ -1,14 +1,8 @@
 # Tổng kết EDA bộ dữ liệu GeoLife Trajectories
 
-Tài liệu này chỉ giữ những insight quan trọng từ quá trình EDA. 
-
-- **Notebook:** [`EDA/`](../EDA/), từ `01` đến `05`. Mọi notebook đọc thẳng file `.plt` gốc.
+- **Notebook:** [`EDA/`](../EDA/), từ `01` đến `05`.
 - **Hình gốc:** [`EDA/figures/`](../EDA/figures/).
-- **Quy ước:**
-  - "giờ local" là giờ địa phương theo timezone chính xác của toạ độ (mục 7);
-  - "ngày làm việc" theo lịch chính thức của Trung Quốc, có ngày nghỉ lễ và ngày làm bù (mục 11); ngoài Trung Quốc là T2–T6;
-  - "khung đêm" là 22:00–06:00;
-  - "khung hành chính" là 09:00–18:00 của ngày làm việc.
+- "Giờ local" là giờ địa phương theo timezone chính xác của toạ độ (mục 8).
 
 | Chỉ số tổng quan | Giá trị |
 | --- | --- |
@@ -112,7 +106,21 @@ Hai file ở hai thư mục user khác nhau được coi là cùng một file kh
 
 **Insight:** gap giữa hai file tập trung quanh khoảng 12 giờ, tương ứng một đêm hoặc một ngày làm việc. Trong 60% trường hợp, người dùng "xuất hiện lại" ngay tại nơi đã dừng ghi. Đây là dấu vết rõ nhất của thời gian ở nhà và ở nơi làm việc, dù trong khoảng đó không có điểm GPS nào.
 
-## 7. Timestamp là UTC; 97% dữ liệu ở UTC+8 nhưng không phải toàn bộ
+## 7. Dữ liệu được ghi theo chuyến đi, không ghi liên tục
+
+![Số giờ ghi mỗi ngày](../EDA/figures/03_hours_recorded_per_day.png)
+
+| Chỉ số | Giá trị |
+| --- | --- |
+| Số giờ có ghi GPS mỗi (user, ngày) | median **1,43 h** · mean 2,31 h · p90 5,6 h |
+| Tỉ lệ ngày có dữ liệu trên span (theo user) | median 0,52 |
+| % trajectory kéo qua nửa đêm | 5,5% |
+
+**Insight:**
+- Mỗi ngày người dùng chỉ bật ghi khoảng 1–2 giờ, khi đang di chuyển.
+- Phần lớn thời gian trong ngày (ngủ, làm việc, học) **không có điểm GPS nào**.
+
+## 8. Timestamp là UTC; 97% dữ liệu ở UTC+8 nhưng không phải toàn bộ
 
 ![UTC vs local](../EDA/figures/03_hour_utc_vs_local.png)
 
@@ -135,11 +143,11 @@ Có hai cách gán timezone: tra polygon timezone (`timezonefinder`) cho từng 
 
 **Insight:**
 - Theo giờ UTC, dữ liệu trông như hoạt động mạnh lúc 0–2h. Đổi sang giờ local thì pattern trở về đúng nhịp sinh hoạt: thấp nhất lúc 3–5h, đỉnh lúc 8–9h và 17–19h.
-- Khung "đêm" theo UTC (22–06h) thực chất là **06–14h ở Bắc Kinh**.
+- Ban đêm theo UTC (22–06h) thực chất là **06–14h ở Bắc Kinh**: mọi phân tích theo giờ phải dùng giờ local.
 - Khoảng 2,5% số điểm nằm ở timezone khác +8, có nơi dùng DST.
 - Lưới thô sai đúng ở chỗ khó (biên giới), trong khi tra chính xác chỉ tốn vài giây. Các notebook EDA đều dùng tra chính xác.
 
-## 8. Dữ liệu tập trung ở Bắc Kinh, với một hotspot chung ở Haidian
+## 9. Dữ liệu tập trung ở Bắc Kinh, với một hotspot chung ở Haidian
 
 ![Mật độ Bắc Kinh](../EDA/figures/02_beijing_density.png)
 
@@ -155,34 +163,7 @@ Có hai cách gán timezone: tra polygon timezone (`timezonefinder`) cho từng 
 - Trong thành phố, user di chuyển trong bán kính khoảng 5–10 km.
 - Header file ghi hệ toạ độ WGS 84, khớp trực tiếp với OpenStreetMap. Bản đồ AMap/Baidu thì lệch khoảng 300–700 m.
 
-## 9. Dữ liệu được ghi theo chuyến đi, không ghi liên tục
-
-![Số giờ ghi mỗi ngày](../EDA/figures/03_hours_recorded_per_day.png)
-
-| Chỉ số | Giá trị |
-| --- | --- |
-| Số giờ có ghi GPS mỗi (user, ngày) | median **1,43 h** · mean 2,31 h · p90 5,6 h |
-| Tỉ lệ ngày có dữ liệu trên span (theo user) | median 0,52 |
-| % trajectory kéo qua nửa đêm | 5,5% |
-
-**Insight:**
-- Mỗi ngày người dùng chỉ bật ghi khoảng 1–2 giờ, khi đang di chuyển.
-- Phần lớn thời gian trong ngày (ngủ, làm việc, học) **không có điểm GPS nào**.
-
-## 10. Nhịp sinh hoạt rõ: hai đỉnh đi làm / về ngày thường, thứ Bảy đi chơi
-
-![Heatmap giờ × ngày](../EDA/figures/03_heatmap_dow_hour.png)
-
-| Ngày | T2 | T3 | T4 | T5 | T6 | T7 | CN |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| % điểm | 13,1 | 12,3 | 13,2 | 13,9 | 14,8 | **18,0** | 14,6 |
-
-**Insight:**
-- Ngày thường có hai đỉnh rõ lúc 8–9h và 17–19h, ứng với đi làm và về nhà.
-- Thứ Bảy có hoạt động dàn trải 10–18h, và mật độ điểm cao nhất tuần.
-- Từ 0h đến 6h gần như không có dữ liệu.
-
-## 11. Lịch làm việc của Trung Quốc có ngày làm bù; ngày nghỉ lễ làm user rời Bắc Kinh
+## 10. Lịch làm việc của Trung Quốc có ngày làm bù; ngày nghỉ lễ làm user rời Bắc Kinh
 
 ![Số user mỗi ngày và ngày nghỉ lễ](../EDA/figures/03_daily_users_holidays.png)
 
@@ -195,31 +176,14 @@ Trung Quốc có **ngày làm bù**: thứ Bảy hoặc Chủ nhật phải đi 
 
 | Chỉ số | Giá trị |
 | --- | --- |
-| Điểm ở Trung Quốc có `is_workday` khác quy tắc T2–T6 | **9,47%** |
+| Điểm ở Trung Quốc có trạng thái ngày làm việc khác quy tắc T2–T6 | **9,47%** |
 | % điểm ở Bắc Kinh: ngày làm việc / cuối tuần thường / ngày nghỉ lễ | 85,7% / 80,7% / **41,8%** |
 
 **Insight:**
 - Quy tắc "T2–T6 là ngày làm việc" sai ở cả hai chiều: ngày lễ rơi vào T2–T6, và ngày làm bù rơi vào T7–CN. Gần 1/10 số điểm bị đổi trạng thái.
 - Trong ngày nghỉ lễ, hơn một nửa số điểm nằm ngoài Bắc Kinh: người dùng về quê hoặc đi du lịch. Nơi ngủ trong các ngày này không phải nơi ở thường ngày.
 
-## 12. Chỉ khoảng 1/3 user có đủ dữ liệu cả ban đêm lẫn giờ hành chính
-
-![Độ phủ đêm và giờ hành chính](../EDA/figures/03_night_work_coverage.png)
-
-| Ngưỡng k | Số user có ≥ k đêm có dữ liệu | Số user có ≥ k ngày làm việc có dữ liệu | Có cả hai |
-| --- | --- | --- | --- |
-| 1 | 168 | 165 | 152 |
-| 3 | 126 | 139 | **107** |
-| 5 | 105 | 118 | 97 |
-| 10 | 74 | 92 | **64** |
-| 20 | 49 | 61 | 44 |
-
-**Insight:**
-- "Đêm có dữ liệu": đêm có ít nhất một điểm GPS trong khung 22–06 local, đêm được gán cho ngày bắt đầu. "Ngày làm việc có dữ liệu": ngày làm việc có ít nhất một điểm trong khung 09–18.
-- 14,55% số điểm nằm trong khung đêm và 29,05% nằm trong khung hành chính.
-- Số user có dữ liệu ở cả hai khung giảm rất nhanh khi tăng ngưỡng k.
-
-## 13. Tốc độ theo phương tiện tách biệt rõ, nhưng tốc độ giữa hai điểm liên tiếp rất nhiễu
+## 11. Tốc độ theo phương tiện tách biệt rõ, nhưng tốc độ giữa hai điểm liên tiếp rất nhiễu
 
 ![Tốc độ theo mode](../EDA/figures/04_speed_by_mode.png)
 
@@ -239,7 +203,7 @@ Trung Quốc có **ngày làm bù**: thứ Bảy hoặc Chủ nhật phải đi 
 - Ngay khi đang dùng phương tiện vẫn có 9–11% điểm gần như đứng yên (bus, taxi), do đèn đỏ, kẹt xe hoặc chờ xe.
 - 4,9% điểm có nhãn `walk` có tốc độ trên 15 km/h.
 
-## 14. Nhãn phương tiện ít và không khớp chặt với log GPS
+## 12. Nhãn phương tiện ít và không khớp chặt với log GPS
 
 | Chỉ số | Giá trị |
 | --- | --- |
@@ -254,7 +218,7 @@ Trung Quốc có **ngày làm bù**: thứ Bảy hoặc Chủ nhật phải đi 
 - Nhãn phương tiện được ghi độc lập với GPS: hơn 1/3 số đoạn nhãn không có điểm nào.
 - Dataset không có ground truth cho nơi ở và nơi làm việc.
 
-## 15. Outlier lớn tập trung trong vài file
+## 13. Outlier lớn tập trung trong vài file
 
 ![Ví dụ spike](../EDA/figures/05_spike_example.png)
 
@@ -272,7 +236,7 @@ Trung Quốc có **ngày làm bù**: thứ Bảy hoặc Chủ nhật phải đi 
 - Phần lớn điểm > 300 km/h nằm trong các chuyến bay không có nhãn.
 - File của user 62 có toạ độ nhảy qua lại giữa Bắc Kinh và Tây An cứ vài giây một lần. Hiện tượng này giống hai luồng vị trí bị trộn lẫn hơn là nhiễu ngẫu nhiên.
 
-## 16. Khi đứng yên, GPS dao động vài chục mét, đuôi phân bố tới hàng trăm mét
+## 14. Khi đứng yên, GPS dao động vài chục mét, đuôi phân bố tới hàng trăm mét
 
 ![Jitter](../EDA/figures/05_jitter.png)
 

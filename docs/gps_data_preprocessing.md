@@ -18,7 +18,7 @@ Ngoài ra, tọa độ không tự cho biết ý nghĩa địa điểm. Phát hi
 
 ## 2. Hiểu định dạng GeoLife trước
 
-Theo [User Guide 1.3, mục 4.1, trang 3](../Geolife_Trajectories/User%20Guide-1.3.pdf):
+Theo [User Guide 1.3, mục 4.1, trang 3](../data/Geolife_Trajectories/User%20Guide-1.3.pdf):
 
 - Mỗi thư mục người dùng chứa các file quỹ đạo `.plt`.
 - Mỗi file `.plt` chứa một quỹ đạo và được đặt tên theo thời điểm bắt đầu.
@@ -44,7 +44,7 @@ Theo [User Guide 1.3, mục 4.1, trang 3](../Geolife_Trajectories/User%20Guide-1
 - Dữ liệu chủ yếu ở Bắc Kinh, nhưng cũng có ở các địa điểm khác. Không tự coi toàn bộ dữ liệu thuộc một thành phố hay timezone.
 - Nhãn được mô tả là phương thức di chuyển của 73 người dùng. User Guide không mô tả nhãn chuẩn cho điểm dừng hoặc home/office.
 
-Nguồn: [User Guide, mục 1, 2.1 và 4](../Geolife_Trajectories/User%20Guide-1.3.pdf).
+Nguồn: [User Guide, mục 1, 2.1 và 4](../data/Geolife_Trajectories/User%20Guide-1.3.pdf).
 
 ## 3. Noise: nhiễu trong phép đo
 
@@ -201,7 +201,7 @@ Một báo cáo tiền xử lý tối thiểu nên có:
 
 ## Tài liệu tham khảo
 
-1. [GeoLife User Guide 1.3](../Geolife_Trajectories/User%20Guide-1.3.pdf): mô tả dữ liệu, tần suất ghi, định dạng PLT, GMT và nhãn phương thức di chuyển.
+1. [GeoLife User Guide 1.3](../data/Geolife_Trajectories/User%20Guide-1.3.pdf): mô tả dữ liệu, tần suất ghi, định dạng PLT, GMT và nhãn phương thức di chuyển.
 2. [GPS.gov — GPS Accuracy](https://www.gps.gov/gps-accuracy): yếu tố ảnh hưởng độ chính xác và multipath.
 3. [Python datetime — Aware and naive objects](https://docs.python.org/3/library/datetime.html#aware-and-naive-objects): cách hiểu thời gian có/không có timezone.
 4. [PostGIS — ST_Distance](https://postgis.net/docs/ST_Distance.html): đơn vị và cách tính khoảng cách phẳng/địa lý.
