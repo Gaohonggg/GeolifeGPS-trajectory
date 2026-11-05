@@ -7,3 +7,5 @@ __pycache__/
 .DS_Store
 
 EDA/outputs/02_beijing_heatmap.html
+
+slides/*
