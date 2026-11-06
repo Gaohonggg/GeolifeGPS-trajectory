@@ -1,6 +1,9 @@
-"""Phát hiện stay (Li et al., 2008) trên toàn chuỗi điểm của một user.
+"""Phát hiện stay trên toàn chuỗi điểm của một user.
 
-Stay = đoạn điểm liên tiếp, mọi điểm nằm trong bán kính D quanh điểm đầu, kéo dài >= T.
+Stay = đoạn điểm liên tiếp kéo dài >= T, mọi điểm nằm trong bán kính D quanh **neo**. Có hai cách đặt neo (`anchor`):
+- `"first"` (Li et al., 2008): neo là điểm đầu của stay, cố định.
+- `"centroid"`: neo động, là tâm (trung bình lat, lon, mỗi điểm nặng như nhau) của các điểm đã nhận vào stay; tính lại sau mỗi
+  điểm được nhận. Điểm mới được nhận khi cách tâm hiện tại <= D. Thời gian không đổi: stay vẫn bắt đầu ở điểm đầu và T đo từ đó.
 Chạy trên chuỗi đã ghép mọi file của user theo thời gian, không chạy riêng từng file: thời gian ở nhà / ở chỗ làm thường nằm
 trong khoảng không ghi giữa hai file (EDA mục 6). Một khoảng không ghi dài hơn max_gap thì cắt stay: không ghi quá lâu
 thì không còn biết user có ở yên hay không.
@@ -19,7 +22,7 @@ STAY_COLS = ["user", "i0", "i1", "start_utc", "end_utc", "start_local", "end_loc
 
 
 @njit(cache=True)
-def _stay_points(lat, lon, t, D, T, max_gap):
+def _stays_first_anchor(lat, lon, t, D, T, max_gap):
     n = len(lat)
     out = []
     i = 0
@@ -33,6 +36,30 @@ def _stay_points(lat, lon, t, D, T, max_gap):
         else:
             i += 1
     return out
+
+
+@njit(cache=True)
+def _stays_centroid_anchor(lat, lon, t, D, T, max_gap):
+    n = len(lat)
+    out = []
+    i = 0
+    while i < n:
+        s_lat, s_lon, k = lat[i], lon[i], 1
+        j = i + 1
+        while j < n and t[j] - t[j - 1] <= max_gap and hav(s_lat / k, s_lon / k, lat[j], lon[j]) <= D:
+            s_lat += lat[j]
+            s_lon += lon[j]
+            k += 1
+            j += 1
+        if t[j - 1] - t[i] >= T:
+            out.append((i, j - 1))
+            i = j
+        else:
+            i += 1
+    return out
+
+
+ANCHORS = {"first": _stays_first_anchor, "centroid": _stays_centroid_anchor}
 
 
 @dataclass
@@ -55,10 +82,17 @@ def iter_users(points: pd.DataFrame):
         yield UserSeq(int(u), lat[idx], lon[idx], ts[idx], loc[idx], tz[idx])
 
 
-def detect_user(U: UserSeq, D_m: float, T_s: float, max_gap_s: float) -> pd.DataFrame:
+def _anchor_fn(anchor: str):
+    if anchor not in ANCHORS:
+        raise ValueError(f"anchor phải là một trong {sorted(ANCHORS)}, nhận được {anchor!r}")
+    return ANCHORS[anchor]
+
+
+def detect_user(U: UserSeq, D_m: float, T_s: float, max_gap_s: float, anchor: str = "first") -> pd.DataFrame:
+    fn = _anchor_fn(anchor)
     if len(U.ts) < 2:
         return pd.DataFrame(columns=STAY_COLS)
-    s = np.array(_stay_points(U.lat, U.lon, U.ts, D_m, T_s, max_gap_s), dtype=np.int64).reshape(-1, 2)
+    s = np.array(fn(U.lat, U.lon, U.ts, D_m, T_s, max_gap_s), dtype=np.int64).reshape(-1, 2)
     a, b = s[:, 0], s[:, 1]
     cs_a, cs_o = np.r_[0, np.cumsum(U.lat)], np.r_[0, np.cumsum(U.lon)]
     n = b - a + 1
@@ -68,8 +102,10 @@ def detect_user(U: UserSeq, D_m: float, T_s: float, max_gap_s: float) -> pd.Data
                          "n_points": n, "dur_h": (U.ts[b] - U.ts[a]) / 3600, "tz": U.tz[a]})
 
 
-def detect_stays(points: pd.DataFrame, D_m: float, T_min: float, max_gap_h: float) -> pd.DataFrame:
-    """Bảng stay của mọi user trong points. i0, i1 là chỉ số điểm trong chuỗi của user; thời gian tính bằng giây epoch."""
-    out = [detect_user(U, D_m, T_min * 60, max_gap_h * 3600) for U in iter_users(points)]
+def detect_stays(points: pd.DataFrame, D_m: float, T_min: float, max_gap_h: float, anchor: str = "first") -> pd.DataFrame:
+    """Bảng stay của mọi user trong points. i0, i1 là chỉ số điểm trong chuỗi của user; thời gian tính bằng giây epoch.
+    Toạ độ của stay là trung bình các điểm của nó (với anchor="centroid" thì trùng neo cuối cùng)."""
+    _anchor_fn(anchor)
+    out = [detect_user(U, D_m, T_min * 60, max_gap_h * 3600, anchor) for U in iter_users(points)]
     out = [o for o in out if len(o)]
     return pd.concat(out, ignore_index=True) if out else pd.DataFrame(columns=STAY_COLS)

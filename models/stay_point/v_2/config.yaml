@@ -1,0 +1,22 @@
+# stay_point v_2: như v_1 nhưng neo của stay là động: tâm (trung bình lat, lon) của các điểm đã nhận, tính lại sau mỗi điểm.
+# Cách chọn từng tham số (chạy trên dev, cùng quy trình và quy tắc chọn với v_1): docs/models/stay_point_v2.md,
+# tái lập bằng tuning.ipynb (cùng thư mục). Đã có kết quả trong results/ thì không sửa: đổi tham số -> tạo version mới.
+
+name: stay_point
+version: 2
+data_version: 1               # dữ liệu data/preprocess/v_1
+
+params:
+  # stay
+  anchor: centroid            # v_1: first (điểm đầu, cố định)
+  D_m: 200
+  T_min: 20
+  max_gap_h: 24
+  # place
+  place_eps_m: 300            # v_1: 200
+  # home / office
+  night_hours: [22, 9]        # khung đêm local, mọi ngày (kể cả ngày nghỉ lễ)
+  work_hours: [9, 18]         # khung hành chính local, chỉ ngày làm việc (có ngày làm bù)
+  min_nights: 3
+  min_workdays: 3
+  same_place_m: 200           # office phải cách home hơn khoảng này

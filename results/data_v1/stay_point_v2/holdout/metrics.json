@@ -1,0 +1,50 @@
+{
+ "model": "stay_point_v2",
+ "data_version": 1,
+ "split": "holdout",
+ "users": 47,
+ "points": 5639032,
+ "params": {
+  "anchor": "centroid",
+  "D_m": 200,
+  "T_min": 20,
+  "max_gap_h": 24,
+  "place_eps_m": 300,
+  "night_hours": [
+   22,
+   9
+  ],
+  "work_hours": [
+   9,
+   18
+  ],
+  "min_nights": 3,
+  "min_workdays": 3,
+  "same_place_m": 200
+ },
+ "stay": {
+  "n_stays": 3719,
+  "stays_per_day": 2.079,
+  "fake_share": 0.1905,
+  "fragment_share": 0.1218,
+  "long_stays": 631
+ },
+ "home_office": {
+  "home": {
+   "predicted": 25,
+   "users": 47,
+   "abstain": {
+    "insufficient_nights": 22
+   }
+  },
+  "office": {
+   "predicted": 19,
+   "users": 47,
+   "abstain": {
+    "insufficient_workdays": 22,
+    "no_distinct_office": 6
+   }
+  }
+ },
+ "runtime_s": 2.9
+}

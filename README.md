@@ -14,7 +14,7 @@ Từ quỹ đạo GPS của bộ [GeoLife Trajectories 1.3](https://www.microsof
 
 | Đường dẫn | Nội dung |
 | --- | --- |
-| `src/geolife/` | Toàn bộ code, theo thứ tự pipeline: `io`, `preprocess`, `timezone`, `calendar`, `stays`, `places`, `home_office`, `models/`, `evaluation`, `run` |
+| `src/geolife/` | Toàn bộ code, theo thứ tự pipeline: `io`, `preprocess`, `timezone`, `calendar`, `stays`, `places`, `home_office`, `models/`, `evaluation`, `run`; `tuning` chứa các phép đo dùng chung khi chọn tham số |
 | `EDA/` | Notebook `01`–`05`, chỉ phân tích dữ liệu thô (đọc thẳng file `.plt`). Hình ở `EDA/figures/` |
 | `preprocess/v_<n>/` | `config.yaml` + `preprocess.ipynb` (gọi hàm trong `src/geolife/preprocess.py`, in mẫu kiểm tra sau mỗi bước) |
 | `models/<tên>/v_<k>/` | `config.yaml` (tham số + version dữ liệu) + `tuning.ipynb` (cách chọn từng tham số, chạy trên `dev`) |
@@ -31,7 +31,8 @@ sửa version đó nữa: đổi tham số thì tạo version mới. Config củ
 2. [`docs/eda_findings.md`](docs/eda_findings.md): insight từ EDA trên dữ liệu thô.
 3. [`docs/preprocess_v1.md`](docs/preprocess_v1.md): pipeline làm sạch, bằng chứng của từng quy tắc, output.
 4. [`docs/evaluation.md`](docs/evaluation.md): chỉ số, cách dùng `dev` / `holdout`, các giả định.
-5. [`docs/models/stay_point_v1.md`](docs/models/stay_point_v1.md): model stay_point v1, cách chọn từng tham số, kết quả holdout.
+5. [`docs/models/stay_point_v1.md`](docs/models/stay_point_v1.md): model stay_point v1 (neo cố định ở điểm đầu), cách chọn từng tham số, kết quả holdout.
+6. [`docs/models/stay_point_v2.md`](docs/models/stay_point_v2.md): model stay_point v2 (neo động: tâm các điểm đã nhận), cùng quy trình chọn tham số với v1.
 
 ## Chạy lại
 

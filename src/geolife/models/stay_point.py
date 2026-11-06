@@ -1,4 +1,4 @@
-"""Stay-point: GPS → stay (Li et al., 2008) → place → home / office."""
+"""Stay-point: GPS → stay → place → home / office. Cách đặt neo của stay lấy từ config (`anchor`, mặc định "first")."""
 from __future__ import annotations
 
 import numpy as np
@@ -17,7 +17,7 @@ class StayPointModel(Model):
 
     def stays(self, points: pd.DataFrame) -> pd.DataFrame:
         p = self.params
-        return detect_stays(points, p["D_m"], p["T_min"], p["max_gap_h"])
+        return detect_stays(points, p["D_m"], p["T_min"], p["max_gap_h"], p.get("anchor", "first"))
 
     def label(self, stays: pd.DataFrame, users) -> tuple[pd.DataFrame, pd.DataFrame]:
         """stays → (stays có cột place, bảng place, dự đoán)."""
