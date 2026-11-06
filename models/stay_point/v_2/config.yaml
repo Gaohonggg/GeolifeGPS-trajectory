@@ -20,3 +20,8 @@ params:
   min_nights: 3
   min_workdays: 3
   same_place_m: 200           # office phải cách home hơn khoảng này
+  # confidence của từng dự đoán (src/geolife/confidence.py, docs/confidence.md)
+  confidence:
+    n_boot: 200               # số lần lấy mẫu lại
+    block: week               # lấy mẫu lại theo tuần
+    seed: 0

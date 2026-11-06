@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 
 from ..calendar import WorkCalendar
+from ..confidence import add_confidence
 from ..home_office import pick_roles, place_table, role_slices
 from ..places import assign_places
 from ..stays import detect_stays
@@ -20,7 +21,7 @@ class StayPointModel(Model):
         return detect_stays(points, p["D_m"], p["T_min"], p["max_gap_h"], p.get("anchor", "first"))
 
     def label(self, stays: pd.DataFrame, users) -> tuple[pd.DataFrame, pd.DataFrame]:
-        """stays → (stays có cột place, bảng place, dự đoán)."""
+        """stays → (stays có cột place, bảng place, dự đoán). Dự đoán luôn có confidence (`confidence.add_confidence`)."""
         p = self.params
         stays = stays.assign(place=assign_places(stays, p["place_eps_m"]).to_numpy())
         years = range(int(pd.Timestamp(stays.start_local.min(), unit="s").year) - 1,
@@ -29,6 +30,7 @@ class StayPointModel(Model):
         sl = role_slices(stays, cal, tuple(p["night_hours"]), tuple(p["work_hours"]))
         places = place_table(stays, sl)
         pred = pick_roles(places, users, p["min_nights"], p["min_workdays"], p["same_place_m"])
+        pred = add_confidence(pred, places, sl, p)
         return stays, places, pred
 
     def predict(self, points: pd.DataFrame):

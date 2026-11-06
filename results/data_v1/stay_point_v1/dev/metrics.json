@@ -19,7 +19,12 @@
   ],
   "min_nights": 3,
   "min_workdays": 3,
-  "same_place_m": 200
+  "same_place_m": 200,
+  "confidence": {
+   "n_boot": 200,
+   "block": "week",
+   "seed": 0
+  }
  },
  "stay": {
   "n_stays": 19784,
@@ -35,6 +40,12 @@
    "abstain": {
     "insufficient_nights": 32,
     "no_night_stay": 15
+   },
+   "confidence": {
+    "p10": 0.597,
+    "p25": 0.75,
+    "p50": 0.927,
+    "p75": 0.996
    }
   },
   "office": {
@@ -43,8 +54,14 @@
    "abstain": {
     "insufficient_workdays": 39,
     "no_distinct_office": 20
+   },
+   "confidence": {
+    "p10": 0.38,
+    "p25": 0.643,
+    "p50": 0.875,
+    "p75": 0.978
    }
   }
  },
- "runtime_s": 7.7
+ "runtime_s": 7.5
 }

@@ -38,7 +38,7 @@ uv run python -m geolife.run --model stay_point --version 1 --split dev
 uv run python -m geolife.run --model stay_point --version 1 --split holdout
 ```
 
-Kết quả ghi vào `results/data_v<d>/<model>_v<k>/<split>/`: `predictions.csv` (home / office theo user) và `metrics.json` (tham số, chỉ số, mô tả output, thời gian chạy).
+Kết quả ghi vào `results/data_v<d>/<model>_v<k>/<split>/`: `predictions.csv` (home / office theo user, kèm confidence của từng dự đoán) và `metrics.json` (tham số, chỉ số, mô tả output, thời gian chạy).
 
 ## 3. Giả định của bước đánh giá
 
@@ -52,4 +52,3 @@ Giả định của từng model (khi nào user được coi là ở yên, home 
 ## 4. Chưa làm
 
 - Kiểm tra thủ công trên mẫu (đối chiếu home / office với bản đồ) để có chỉ số đúng / sai cho home / office.
-- Confidence cho từng dự đoán.

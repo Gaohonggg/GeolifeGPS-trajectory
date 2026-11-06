@@ -219,6 +219,6 @@ uv run python -m geolife.run --model stay_point --version 2 --split holdout
 | Phân mảnh | 8,3% | 12,2% |
 | Stay dài ≥ 6 h | 4.728 | 631 |
 | User có home / office | 87 / 78 | 25 / 19 |
-| Thời gian chạy | 10,6 s | 2,9 s |
+| Thời gian chạy | 10,1 s | 2,9 s |
 
 Kết quả ở `results/data_v1/stay_point_v2/{dev,holdout}/`. So sánh và đánh giá với v_1 làm sau.

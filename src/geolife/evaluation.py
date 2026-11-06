@@ -67,7 +67,12 @@ def stay_metrics(stays: pd.DataFrame, points: pd.DataFrame, flags: pd.DataFrame)
 
 
 def prediction_summary(pred: pd.DataFrame) -> dict:
-    """Mô tả output home / office (không phải chỉ số đánh giá): bao nhiêu user có dự đoán, lý do abstain."""
-    return {role: {"predicted": int(g.abstain_reason.isna().sum()), "users": len(g),
-                   "abstain": g.abstain_reason.value_counts().to_dict()}
-            for role, g in pred.groupby("role")}
+    """Mô tả output home / office (không phải chỉ số đánh giá): bao nhiêu user có dự đoán, lý do abstain, phân bố confidence."""
+    out = {}
+    for role, g in pred.groupby("role"):
+        out[role] = {"predicted": int(g.abstain_reason.isna().sum()), "users": len(g),
+                     "abstain": g.abstain_reason.value_counts().to_dict()}
+        if "confidence" in g:
+            q = g.confidence.dropna().quantile([0.1, 0.25, 0.5, 0.75])
+            out[role]["confidence"] = {f"p{int(k * 100)}": round(float(v), 3) for k, v in q.items()}
+    return out

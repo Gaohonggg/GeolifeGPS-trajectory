@@ -20,7 +20,12 @@
   ],
   "min_nights": 3,
   "min_workdays": 3,
-  "same_place_m": 200
+  "same_place_m": 200,
+  "confidence": {
+   "n_boot": 200,
+   "block": "week",
+   "seed": 0
+  }
  },
  "stay": {
   "n_stays": 3719,
@@ -35,6 +40,12 @@
    "users": 47,
    "abstain": {
     "insufficient_nights": 22
+   },
+   "confidence": {
+    "p10": 0.535,
+    "p25": 0.595,
+    "p50": 0.85,
+    "p75": 0.98
    }
   },
   "office": {
@@ -43,6 +54,12 @@
    "abstain": {
     "insufficient_workdays": 22,
     "no_distinct_office": 6
+   },
+   "confidence": {
+    "p10": 0.454,
+    "p25": 0.528,
+    "p50": 0.62,
+    "p75": 0.913
    }
   }
  },

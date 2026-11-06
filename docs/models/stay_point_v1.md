@@ -247,7 +247,7 @@ uv run python -m geolife.run --model stay_point --version 1 --split holdout
 | Stay dài ≥ 6 h | 4.829 | 632 |
 | User có home / office | 88 / 76 | 25 / 18 |
 | Lý do abstain home | 32 thiếu đêm, 15 không có stay đêm | 22 thiếu đêm |
-| Thời gian chạy | 6,8 s | 2,0 s |
+| Thời gian chạy | 7,5 s | 2,0 s |
 
 - Số stay mỗi ngày ổn định giữa hai tập.
 - **Phân mảnh trên holdout cao hơn rõ (19,4% so với 13,3%)**, còn **stay giả thấp hơn nhiều (17,4% so với 46,9%)**. Holdout có ít dữ liệu mỗi user hơn (median 18 ngày so với 24) và không
