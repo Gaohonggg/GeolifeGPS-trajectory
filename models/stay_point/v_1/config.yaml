@@ -1,0 +1,21 @@
+# stay_point v_1: GPS -> stay (Li et al., 2008) -> place -> home / office.
+# Cách chọn từng tham số (chạy trên dev): docs/models/stay_point_v1.md, tái lập bằng tuning.ipynb (cùng thư mục).
+# Đã có kết quả trong results/ thì không sửa: đổi tham số -> tạo v_2.
+
+name: stay_point
+version: 1
+data_version: 1               # dữ liệu data/preprocess/v_1
+
+params:
+  # stay
+  D_m: 200
+  T_min: 20
+  max_gap_h: 24
+  # place
+  place_eps_m: 200
+  # home / office
+  night_hours: [22, 9]        # khung đêm local, mọi ngày (kể cả ngày nghỉ lễ)
+  work_hours: [9, 18]         # khung hành chính local, chỉ ngày làm việc (có ngày làm bù)
+  min_nights: 3
+  min_workdays: 3
+  same_place_m: 200           # office phải cách home hơn khoảng này
