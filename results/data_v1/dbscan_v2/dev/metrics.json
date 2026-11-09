@@ -1,0 +1,70 @@
+{
+ "model": "dbscan_v2",
+ "data_version": 1,
+ "split": "dev",
+ "users": 135,
+ "points": 18452398,
+ "params": {
+  "cell_center": "weighted",
+  "cell_m": 30,
+  "eps_m": 100,
+  "min_time_min": 240,
+  "T_min": 20,
+  "bridge_min": 10,
+  "max_gap_h": 24,
+  "night_hours": [
+   21,
+   9
+  ],
+  "work_hours": [
+   9,
+   19
+  ],
+  "min_nights": 2,
+  "min_workdays": 2,
+  "same_place_m": 200,
+  "confidence": {
+   "n_boot": 200,
+   "block": "week",
+   "seed": 0
+  }
+ },
+ "stay": {
+  "n_stays": 10837,
+  "stays_per_day": 1.158,
+  "fake_share": 0.5845,
+  "fragment_share": 0.0155,
+  "long_stays": 5158
+ },
+ "home_office": {
+  "home": {
+   "predicted": 93,
+   "users": 135,
+   "abstain": {
+    "no_night_stay": 24,
+    "insufficient_nights": 18
+   },
+   "confidence": {
+    "p10": 0.707,
+    "p25": 0.905,
+    "p50": 1.0,
+    "p75": 1.0
+   }
+  },
+  "office": {
+   "predicted": 83,
+   "users": 135,
+   "abstain": {
+    "no_distinct_office": 33,
+    "insufficient_workdays": 19
+   },
+   "confidence": {
+    "p10": 0.466,
+    "p25": 0.623,
+    "p50": 0.93,
+    "p75": 1.0
+   }
+  }
+ },
+ "runtime_s": 13.8
+}

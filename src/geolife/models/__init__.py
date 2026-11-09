@@ -7,9 +7,10 @@
 from __future__ import annotations
 
 from .base import Model, load_config
+from .dbscan import DbscanModel
 from .stay_point import StayPointModel
 
-REGISTRY: dict[str, type[Model]] = {m.name: m for m in [StayPointModel]}
+REGISTRY: dict[str, type[Model]] = {m.name: m for m in [StayPointModel, DbscanModel]}
 
 
 def load_model(name: str, version: int, **overrides) -> Model:

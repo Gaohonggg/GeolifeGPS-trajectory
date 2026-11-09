@@ -19,6 +19,7 @@ import numpy as np
 import pandas as pd
 
 from .calendar import WorkCalendar
+from .confidence import add_confidence
 from .geo import haversine
 from .timezone import tz_country
 
@@ -92,6 +93,18 @@ def pick_roles(places: pd.DataFrame, users, min_nights: int, min_workdays: int, 
         else:
             rows.append(_row(u, "office", ok.loc[ok.office_h.idxmax()]))
     return pd.DataFrame(rows)
+
+
+def label_roles(stays: pd.DataFrame, users, p: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Stay đã có cột place → (bảng place, dự đoán home / office kèm confidence). Dùng chung cho mọi model.
+    p: params của model (khung giờ, min_nights, min_workdays, same_place_m, khối confidence)."""
+    years = range(int(pd.Timestamp(stays.start_local.min(), unit="s").year) - 1,
+                  int(pd.Timestamp(stays.end_local.max(), unit="s").year) + 2)
+    cal = WorkCalendar(np.unique(tz_country(stays.tz.unique())), years)
+    sl = role_slices(stays, cal, tuple(p["night_hours"]), tuple(p["work_hours"]))
+    places = place_table(stays, sl)
+    pred = pick_roles(places, users, p["min_nights"], p["min_workdays"], p["same_place_m"])
+    return places, add_confidence(pred, places, sl, p)
 
 
 def _row(u, role, r, reason=None):

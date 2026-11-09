@@ -1,0 +1,30 @@
+# dbscan v_1: GPS -> DBSCAN trên ô lưới, trọng số thời gian (mỗi cụm là một place) -> visit -> home / office.
+# Toạ độ đại diện của ô: tâm hình học của ô.
+# Cách chọn từng tham số (chạy trên dev): docs/models/dbscan_v1.md, tái lập bằng tuning.ipynb (cùng thư mục).
+# Đã có kết quả trong results/ thì không sửa: đổi tham số -> tạo version mới.
+
+name: dbscan
+version: 1
+data_version: 1               # dữ liệu data/preprocess/v_1
+
+params:
+  # cụm (place)
+  cell_center: grid           # v_2: weighted
+  cell_m: 30                  # cạnh ô lưới
+  eps_m: 100                  # bán kính láng giềng của DBSCAN
+  min_time_min: 240           # tổng thời gian tối thiểu trong bán kính eps để ô là lõi
+  # visit
+  T_min: 20                   # visit ngắn hơn thì bỏ
+  bridge_min: 10              # đoạn nhiễu chen giữa ngắn hơn thì nối vào visit
+  max_gap_h: 24               # khoảng không ghi dài hơn thì cắt visit và không tính trọng số
+  # home / office
+  night_hours: [21, 9]        # khung đêm local, mọi ngày (kể cả ngày nghỉ lễ)
+  work_hours: [9, 19]         # khung hành chính local, chỉ ngày làm việc (có ngày làm bù)
+  min_nights: 2
+  min_workdays: 2
+  same_place_m: 200           # office phải cách home hơn khoảng này
+  # confidence của từng dự đoán (src/geolife/confidence.py, docs/confidence.md)
+  confidence:
+    n_boot: 200               # số lần lấy mẫu lại
+    block: week               # lấy mẫu lại theo tuần
+    seed: 0
