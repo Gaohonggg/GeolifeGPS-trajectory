@@ -268,7 +268,10 @@ components:
           type: number
           minimum: 0
           maximum: 1
-          description: Số đêm (ngày làm việc) ở place này / số đêm (ngày làm việc) user có dữ liệu trong khung giờ đó
+          description: |
+            Số đêm (ngày làm việc) ở place này / số đêm (ngày làm việc) khác nhau có stay được phát hiện trong khung giờ đó,
+            ở bất kỳ place nào. Đêm có GPS nhưng không có stay (đang di chuyển, tín hiệu thưa) không tính vào mẫu số:
+            vd. 10 đêm có GPS, chỉ 2 đêm có stay và cả hai ở place này thì regularity = 1.
         margin:
           type: number
           minimum: 0

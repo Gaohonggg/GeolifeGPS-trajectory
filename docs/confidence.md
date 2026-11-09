@@ -33,7 +33,7 @@ user không phụ thuộc vào việc chạy chung với những user nào.
 
 | Cột | Định nghĩa | Thấp nghĩa là |
 | --- | --- | --- |
-| `regularity` | Số đêm (ngày làm việc) ở place được chọn / số đêm (ngày làm việc) user có dữ liệu trong khung giờ đó | User không về place này đều đặn |
+| `regularity` | Số đêm (ngày làm việc) ở place được chọn / số đêm (ngày làm việc) khác nhau có stay được phát hiện trong khung giờ đó, ở bất kỳ place nào. Đêm có GPS nhưng không có stay không tính vào mẫu số (vd. 10 đêm có GPS, chỉ 2 đêm có stay và cả hai ở place được chọn thì = 1) | User không về place này đều đặn |
 | `margin` | (giờ place thứ nhất − giờ place thứ hai) / giờ place thứ nhất, trong các place đủ điều kiện; chỉ có một place thì = 1 | Có một place khác gần như ngang ngửa |
 
 ## 2. Ví dụ

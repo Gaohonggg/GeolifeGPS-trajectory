@@ -101,7 +101,8 @@ def add_confidence(pred: pd.DataFrame, places: pd.DataFrame, slices: pd.DataFram
     """Thêm các cột CONF_COLS vào bảng dự đoán của `pick_roles`. params: params của model (có khối `confidence`)."""
     cp = params["confidence"]
     tab = block_table(slices, cp["block"])
-    # Mẫu số của regularity: số đêm / ngày làm việc khác nhau user có dữ liệu trong khung giờ, ở bất kỳ place nào
+    # Mẫu số của regularity: số đêm / ngày làm việc khác nhau có stay được phát hiện trong khung giờ, ở bất kỳ place nào
+    # (đếm từ lát giờ của stay, không phải từ điểm GPS: đêm có GPS mà không có stay thì không biết user ở đâu nên không tính)
     seen = {"home": slices[slices.home].groupby("user").night_day.nunique(),
             "office": slices[slices.office].groupby("user").day.nunique()}
     ref = {(u, r): int(p) for u, r, p in zip(pred.user, pred.role, pred.place)}
