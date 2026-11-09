@@ -19,11 +19,13 @@ import numpy as np
 import pandas as pd
 
 from .calendar import WorkCalendar
-from .confidence import add_confidence
+from .confidence import CONF_COLS, add_confidence
 from .geo import haversine
 from .timezone import tz_country
 
 HOUR = 3600
+PLACE_COLS = ["user", "place", "lat", "lon", "n_stays", "total_h", "home_h", "nights", "office_h", "workdays"]
+PRED_COLS = ["user", "role", "place", "lat", "lon", "hours", "days", "abstain_reason"]
 
 
 def hour_slices(start_local: np.ndarray, end_local: np.ndarray):
@@ -92,12 +94,18 @@ def pick_roles(places: pd.DataFrame, users, min_nights: int, min_workdays: int, 
             rows.append(_row(u, "office", None, "insufficient_workdays"))
         else:
             rows.append(_row(u, "office", ok.loc[ok.office_h.idxmax()]))
-    return pd.DataFrame(rows)
+    return pd.DataFrame(rows, columns=PRED_COLS)
 
 
 def label_roles(stays: pd.DataFrame, users, p: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Stay đã có cột place → (bảng place, dự đoán home / office kèm confidence). Dùng chung cho mọi model.
-    p: params của model (khung giờ, min_nights, min_workdays, same_place_m, khối confidence)."""
+    p: params của model (khung giờ, min_nights, min_workdays, same_place_m, khối confidence).
+    Không có stay nào (input quá ít hoặc user chỉ di chuyển): mọi user abstain (`no_night_stay`, `no_distinct_office`),
+    confidence để trống."""
+    if stays.empty:
+        places = pd.DataFrame(columns=PLACE_COLS)
+        pred = pick_roles(places, users, p["min_nights"], p["min_workdays"], p["same_place_m"])
+        return places, pred.assign(**{c: np.nan for c in CONF_COLS})
     years = range(int(pd.Timestamp(stays.start_local.min(), unit="s").year) - 1,
                   int(pd.Timestamp(stays.end_local.max(), unit="s").year) + 2)
     cal = WorkCalendar(np.unique(tz_country(stays.tz.unique())), years)

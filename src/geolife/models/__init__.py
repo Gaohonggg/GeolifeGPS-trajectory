@@ -15,4 +15,6 @@ REGISTRY: dict[str, type[Model]] = {m.name: m for m in [StayPointModel, DbscanMo
 
 def load_model(name: str, version: int, **overrides) -> Model:
     """Model với tham số của một version; overrides (vd. D_m=100) chỉ dùng khi tuning."""
+    if name not in REGISTRY:
+        raise ValueError(f"model phải là một trong {sorted(REGISTRY)}, nhận được {name!r}")
     return REGISTRY[name].from_config(load_config(name, version), **overrides)

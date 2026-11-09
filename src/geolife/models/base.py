@@ -29,8 +29,23 @@ class UserSeq:
     tz: np.ndarray
 
 
+POINT_COLS = ["user", "ts_utc", "ts_local", "lat", "lon", "tz"]
+
+
+def check_points(points: pd.DataFrame) -> None:
+    """Báo lỗi sớm nếu bảng điểm thiếu cột hoặc chưa sort theo (user, ts_utc): sai thứ tự không làm code lỗi mà cho stay sai."""
+    missing = [c for c in POINT_COLS if c not in points]
+    if missing:
+        raise ValueError(f"bảng điểm thiếu cột {missing}")
+    u = points.user.to_numpy()
+    t = points.ts_utc.to_numpy()
+    if len(u) > 1 and not np.all((u[1:] > u[:-1]) | ((u[1:] == u[:-1]) & (t[1:] >= t[:-1]))):
+        raise ValueError("bảng điểm phải sort theo (user, ts_utc)")
+
+
 def iter_users(points: pd.DataFrame):
     """points phải sort theo (user, ts_utc), như points.parquet."""
+    check_points(points)
     ts = points.ts_utc.to_numpy().astype("datetime64[s]").astype(np.int64).astype(np.float64)
     loc = points.ts_local.to_numpy().astype("datetime64[s]").astype(np.int64).astype(np.float64)
     lat, lon, tz = points.lat.to_numpy(), points.lon.to_numpy(), points.tz.astype(str).to_numpy()
@@ -43,8 +58,12 @@ def config_path(name: str, version: int) -> Path:
 
 
 def load_config(name: str, version: int) -> dict:
-    cfg = yaml.safe_load(config_path(name, version).read_text())
-    assert cfg["name"] == name and cfg["version"] == version, f"config không khớp {name} v_{version}"
+    path = config_path(name, version)
+    if not path.exists():
+        raise FileNotFoundError(f"không có config cho {name} v_{version}: {path}")
+    cfg = yaml.safe_load(path.read_text())
+    if cfg.get("name") != name or cfg.get("version") != version:
+        raise ValueError(f"config {path} ghi {cfg.get('name')} v_{cfg.get('version')}, không khớp {name} v_{version}")
     return cfg
 
 

@@ -19,6 +19,9 @@ Ngoài chỉ số, mỗi lần chạy ghi thêm **mô tả output** home / offic
 **Đọc chỉ số thế nào:**
 - Các chỉ số dùng để **so sánh tương đối giữa các bộ tham số**, không phải độ chính xác tuyệt đối.
 - Stay giả chỉ đo được ở user có nhãn (69/182), và nhãn được ghi độc lập với GPS (EDA 12). Khoảng nhãn thường trùm cả lúc xe đã dựng / đỗ và cả khoảng không ghi, nên tỉ lệ này bị thổi phồng bởi nhiễu nhãn: chỉ dùng để so sánh giữa các bộ tham số, không đọc như tỉ lệ lỗi thật. Tính theo thời gian thay vì số điểm sẽ bớt nhiễu hơn (chưa làm).
+- Chỉ số không đo được vì thiếu dữ liệu thì ghi `null`, không ghi 0. Vd. không có stay nào đủ nhãn thì tỉ lệ stay giả là `null`
+  (không đánh giá được), khác với 0 (có đánh giá, không có stay giả). `metrics.json` ghi thêm `labeled_stays` (số stay đủ nhãn,
+  mẫu số của tỉ lệ stay giả) để biết tỉ lệ đó dựa trên bao nhiêu stay.
 - Chỉ số gộp theo stay nên user nhiều dữ liệu có trọng số lớn hơn. Power user lớn nhất nằm ở `dev`, không ở `holdout` ([preprocess_v1.md](preprocess_v1.md), mục 2.7).
 
 ## 2. Dùng dữ liệu thế nào
@@ -49,6 +52,6 @@ Kết quả ghi vào `results/data_v<d>/<model>_v<k>/<split>/`: `predictions.csv
 
 Giả định của từng model (khi nào user được coi là ở yên, home / office là gì...) nằm trong doc của model đó.
 
-## 4. Chưa làm
+## 4. Đánh giá bổ sung tùy chọn
 
-- Kiểm tra thủ công trên mẫu (đối chiếu home / office với bản đồ) để có chỉ số đúng / sai cho home / office.
+- Kiểm tra thủ công trên mẫu (đối chiếu home / office với bản đồ và quỹ đạo) để đánh giá tính hợp lý của dự đoán. Chưa thực hiện và không bắt buộc cho checkpoint 1. Bản đồ không thay thế nhãn chuẩn để đo accuracy của home / office.

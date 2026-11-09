@@ -34,7 +34,8 @@
   "stays_per_day": 1.138,
   "fake_share": 0.5859,
   "fragment_share": 0.0141,
-  "long_stays": 5155
+  "long_stays": 5155,
+  "labeled_stays": 2007
  },
  "home_office": {
   "home": {
@@ -66,5 +67,5 @@
    }
   }
  },
- "runtime_s": 15.2
+ "runtime_s": 14.2
 }

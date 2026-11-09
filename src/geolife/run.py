@@ -12,7 +12,7 @@ import json
 import time
 
 from . import io
-from .evaluation import label_flags, prediction_summary, stay_metrics
+from .evaluation import fake_counts, label_flags, prediction_summary, stay_metrics
 from .models import load_model
 from .paths import results_dir
 
@@ -33,7 +33,8 @@ def main(argv=None):
     runtime = time.perf_counter() - t0
     flags = label_flags(points, io.load_labels(dv))
     metrics = {"model": model.run_name, "data_version": dv, "split": a.split, "users": len(users),
-               "points": len(points), "params": model.params, "stay": stay_metrics(stays, points, flags),
+               "points": len(points), "params": model.params,
+               "stay": {**stay_metrics(stays, points, flags), "labeled_stays": fake_counts(stays, points, flags)[1]},
                "home_office": prediction_summary(pred), "runtime_s": round(runtime, 1)}
     out = results_dir(dv, model.run_name) / a.split
     out.mkdir(parents=True, exist_ok=True)
