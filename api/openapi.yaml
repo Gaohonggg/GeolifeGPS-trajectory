@@ -1,0 +1,300 @@
+# OpenAPI 3.1 – API gọi model suy ra home / office từ GPS.
+# Server serve đúng một model; tham số lấy từ config của model đó, client không chọn version.
+
+openapi: 3.1.0
+
+info:
+  title: GeoLife Home/Office API
+  version: 1.0.0
+  description: |
+    Suy ra home và office kèm confidence, theo hai cách:
+
+    - `POST /predict`: client tự gửi điểm GPS.
+    - `POST /users/{userId}/predictions`: server lấy điểm GPS của user trong DB.
+
+    Quy ước:
+    - Thời gian theo ISO 8601, có offset (`2008-10-23T02:53:04Z`).
+    - Toạ độ WGS84, độ thập phân.
+    - Lỗi trả về dạng `{ "error": { "code", "message" } }`.
+
+servers:
+  - url: http://localhost:8000
+
+security:
+  - apiKeyAuth: []
+
+paths:
+  /health:
+    get:
+      summary: Kiểm tra dịch vụ, model và DB đã sẵn sàng chưa
+      operationId: getHealth
+      security: []
+      responses:
+        "200":
+          description: Sẵn sàng nhận request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+              example:
+                status: ok
+                model_loaded: true
+                db_connected: true
+        "503":
+          description: Model chưa nạp xong hoặc mất kết nối DB
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+              example:
+                status: unavailable
+                model_loaded: true
+                db_connected: false
+
+  /predict:
+    post:
+      summary: Chạy model trên loạt điểm GPS gửi lên
+      operationId: predict
+      description: Chạy toàn bộ pipeline (preprocess -> stay -> place -> home / office) trên các điểm trong body. Không đọc hay ghi DB.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PredictRequest"
+            example:
+              points:
+                - { time: "2008-10-23T02:53:04Z", lat: 39.984702, lon: 116.318417 }
+                - { time: "2008-10-23T02:53:10Z", lat: 39.984683, lon: 116.318450 }
+      responses:
+        "200":
+          description: Kết quả home / office
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Prediction"
+              examples:
+                user5:
+                  $ref: "#/components/examples/Prediction"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /users/{userId}/predictions:
+    post:
+      summary: Chạy model trên dữ liệu GPS của user trong DB
+      operationId: predictUser
+      description: |
+        Server truy vấn điểm GPS của user trong DB (lọc theo `start`, `end` nếu có), chạy pipeline và trả kết quả.
+        Không truyền khoảng thời gian thì dùng toàn bộ dữ liệu của user.
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/UserId"
+        - name: start
+          in: query
+          description: Chỉ lấy điểm từ thời điểm này
+          schema:
+            type: string
+            format: date-time
+        - name: end
+          in: query
+          description: Chỉ lấy điểm trước thời điểm này
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: Kết quả home / office của user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserPrediction"
+              examples:
+                user5:
+                  $ref: "#/components/examples/UserPrediction"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+components:
+  securitySchemes:
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+
+  schemas:
+    UserId:
+      type: integer
+      minimum: 0
+      example: 5
+
+    Health:
+      type: object
+      required: [status, model_loaded, db_connected]
+      properties:
+        status:
+          type: string
+          enum: [ok, unavailable]
+        model_loaded:
+          type: boolean
+        db_connected:
+          type: boolean
+
+    GpsPoint:
+      type: object
+      required: [time, lat, lon]
+      properties:
+        time:
+          type: string
+          format: date-time
+        lat:
+          type: number
+          minimum: -90
+          maximum: 90
+        lon:
+          type: number
+          minimum: -180
+          maximum: 180
+
+    PredictRequest:
+      type: object
+      required: [points]
+      properties:
+        points:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/GpsPoint"
+
+    Place:
+      type: object
+      description: Một dự đoán home hoặc office. Khi model từ chối dự đoán, chỉ có `abstain_reason`.
+      properties:
+        lat:
+          type: number
+        lon:
+          type: number
+        hours:
+          type: number
+          description: Tổng giờ ở place trong khung giờ của role
+        days:
+          type: integer
+          description: Số đêm (home) / ngày làm việc (office) có mặt
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        abstain_reason:
+          type: string
+          enum: [insufficient_nights, insufficient_workdays, no_distinct_office]
+
+    Prediction:
+      type: object
+      required: [home, office]
+      properties:
+        home:
+          $ref: "#/components/schemas/Place"
+        office:
+          $ref: "#/components/schemas/Place"
+
+    UserPrediction:
+      allOf:
+        - type: object
+          required: [user_id, n_points, time_range]
+          properties:
+            user_id:
+              $ref: "#/components/schemas/UserId"
+            n_points:
+              type: integer
+              description: Số điểm GPS lấy từ DB để chạy model
+            time_range:
+              type: object
+              required: [start, end]
+              properties:
+                start:
+                  type: string
+                  format: date-time
+                end:
+                  type: string
+                  format: date-time
+        - $ref: "#/components/schemas/Prediction"
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+
+  responses:
+    BadRequest:
+      description: Dữ liệu gửi lên không hợp lệ
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: { code: invalid_point, message: "points[12].lat must be <= 90" }
+    Unauthorized:
+      description: Thiếu hoặc sai API key
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: User không có trong DB, hoặc không có điểm nào trong khoảng thời gian yêu cầu
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: { code: user_not_found, message: "user 999 not found" }
+
+  examples:
+    Prediction:
+      value:
+        home:
+          lat: 40.0001537
+          lon: 116.3267473
+          hours: 115.44
+          days: 23
+          confidence: 0.535
+        office:
+          lat: 40.0103650
+          lon: 116.3220908
+          hours: 53.85
+          days: 17
+          confidence: 0.535
+    UserPrediction:
+      value:
+        user_id: 5
+        n_points: 108607
+        time_range:
+          start: "2008-10-23T02:53:04Z"
+          end: "2009-07-05T09:12:37Z"
+        home:
+          lat: 40.0001537
+          lon: 116.3267473
+          hours: 115.44
+          days: 23
+          confidence: 0.535
+        office:
+          lat: 40.0103650
+          lon: 116.3220908
+          hours: 53.85
+          days: 17
+          confidence: 0.535
