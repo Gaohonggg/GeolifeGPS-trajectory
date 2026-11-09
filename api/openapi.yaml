@@ -16,9 +16,28 @@ info:
     - Thời gian theo ISO 8601, có offset (`2008-10-23T02:53:04Z`).
     - Toạ độ WGS84, độ thập phân.
     - Lỗi trả về dạng `{ "error": { "code", "message" } }`.
+    - Mỗi response có `model` (tên và version của model đang serve) để biết kết quả đến từ đâu.
+
+    **Dự đoán và abstain.** Với mỗi role (`home`, `office`), model hoặc trả một place, hoặc từ chối dự đoán (abstain)
+    kèm lý do. Hai dạng loại trừ nhau: dự đoán luôn có toạ độ và `confidence`; abstain chỉ có `abstain_reason`.
+
+    **Không đủ dữ liệu không phải là lỗi.** Điểm GPS hợp lệ nhưng quá ít (vd. vài điểm, chỉ đang di chuyển, chưa đủ số
+    đêm) vẫn trả `200`, với role tương ứng là abstain. Lỗi `4xx` chỉ dành cho request sai hoặc không có điểm nào để chạy.
+
+    | Lý do abstain | Role | Ý nghĩa |
+    | --- | --- | --- |
+    | `no_night_stay` | home | Không có lần ở lại nào rơi vào khung đêm (gồm cả khi không tạo được lần ở lại nào) |
+    | `insufficient_nights` | home | Có ở lại ban đêm nhưng không place nào đủ số đêm tối thiểu |
+    | `no_distinct_office` | office | Không có place nào có giờ trong khung hành chính của ngày làm việc và cách home đủ xa |
+    | `insufficient_workdays` | office | Có place ứng viên nhưng không place nào đủ số ngày làm việc tối thiểu |
+
+    **Confidence không phải xác suất đúng.** GeoLife không có nhãn home / office nên không đo được accuracy. Confidence đo
+    **độ ổn định**: lấy mẫu lại các tuần dữ liệu của user (200 lần), chọn lại home / office theo đúng luật của model, và
+    đếm tỉ lệ lần chọn ra cùng place. User ít tuần dữ liệu cho confidence dao động mạnh; đọc kèm `days` và `regularity`.
 
 servers:
-  - url: http://localhost:8000
+  - url: http://localhost:8000/v1
+    description: Version của API nằm trong đường dẫn; đổi contract không tương thích thì lên /v2
 
 security:
   - apiKeyAuth: []
@@ -55,7 +74,10 @@ paths:
     post:
       summary: Chạy model trên loạt điểm GPS gửi lên
       operationId: predict
-      description: Chạy toàn bộ pipeline (preprocess -> stay -> place -> home / office) trên các điểm trong body. Không đọc hay ghi DB.
+      description: |
+        Chạy toàn bộ pipeline (preprocess -> stay -> place -> home / office) trên các điểm trong body. Không đọc hay ghi DB.
+        Mọi điểm được coi là của cùng một người. Thứ tự điểm không quan trọng: server sort theo thời gian; điểm trùng
+        thời gian và điểm nhiễu được xử lý như preprocess.
       requestBody:
         required: true
         content:
@@ -74,12 +96,18 @@ paths:
               schema:
                 $ref: "#/components/schemas/Prediction"
               examples:
-                user5:
+                predicted:
                   $ref: "#/components/examples/Prediction"
+                notEnoughData:
+                  $ref: "#/components/examples/PredictionAbstain"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
 
   /users/{userId}/predictions:
     post:
@@ -87,7 +115,9 @@ paths:
       operationId: predictUser
       description: |
         Server truy vấn điểm GPS của user trong DB (lọc theo `start`, `end` nếu có), chạy pipeline và trả kết quả.
-        Không truyền khoảng thời gian thì dùng toàn bộ dữ liệu của user.
+        Không truyền khoảng thời gian thì dùng toàn bộ dữ liệu của user. `start` phải trước `end` (nếu không: `400`).
+        User không có trong DB, hoặc không có điểm nào trong khoảng thời gian: `404`. Có điểm nhưng không đủ để dự đoán:
+        `200` kèm abstain.
       parameters:
         - name: userId
           in: path
@@ -122,6 +152,10 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
 
 components:
   securitySchemes:
@@ -174,36 +208,96 @@ components:
           items:
             $ref: "#/components/schemas/GpsPoint"
 
-    Place:
+    HomeResult:
+      description: Kết quả cho home. Hoặc dự đoán, hoặc abstain.
+      oneOf:
+        - $ref: "#/components/schemas/PlacePrediction"
+        - type: object
+          title: HomeAbstain
+          required: [abstain_reason]
+          additionalProperties: false
+          properties:
+            abstain_reason:
+              type: string
+              enum: [no_night_stay, insufficient_nights]
+
+    OfficeResult:
+      description: Kết quả cho office. Hoặc dự đoán, hoặc abstain.
+      oneOf:
+        - $ref: "#/components/schemas/PlacePrediction"
+        - type: object
+          title: OfficeAbstain
+          required: [abstain_reason]
+          additionalProperties: false
+          properties:
+            abstain_reason:
+              type: string
+              enum: [no_distinct_office, insufficient_workdays]
+
+    PlacePrediction:
       type: object
-      description: Một dự đoán home hoặc office. Khi model từ chối dự đoán, chỉ có `abstain_reason`.
+      description: Một place được dự đoán là home hoặc office.
+      required: [lat, lon, hours, days, confidence, regularity, margin]
+      additionalProperties: false
       properties:
         lat:
           type: number
+          minimum: -90
+          maximum: 90
+          description: Tâm của place, trung bình theo thời gian ở lại
         lon:
           type: number
+          minimum: -180
+          maximum: 180
         hours:
           type: number
-          description: Tổng giờ ở place trong khung giờ của role
+          minimum: 0
+          description: Tổng giờ ở place trong khung giờ của role (khung đêm cho home, khung hành chính của ngày làm việc cho office)
         days:
           type: integer
-          description: Số đêm (home) / ngày làm việc (office) có mặt
+          minimum: 1
+          description: Số đêm (home) / ngày làm việc (office) khác nhau có mặt ở place
         confidence:
           type: number
           minimum: 0
           maximum: 1
-        abstain_reason:
+          description: |
+            Tỉ lệ trong 200 lần lấy mẫu lại theo tuần mà model chọn ra đúng place này. Đo độ ổn định của dự đoán,
+            không phải xác suất đúng.
+        regularity:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Số đêm (ngày làm việc) ở place này / số đêm (ngày làm việc) user có dữ liệu trong khung giờ đó
+        margin:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: |
+            (giờ của place này − giờ của place đứng thứ hai) / giờ của place này, trong các place đủ điều kiện.
+            Gần 0: có một place khác gần như ngang ngửa. Chỉ có một place đủ điều kiện thì = 1.
+
+    ModelInfo:
+      type: object
+      required: [name, version]
+      properties:
+        name:
           type: string
-          enum: [insufficient_nights, insufficient_workdays, no_distinct_office]
+          example: stay_point
+        version:
+          type: integer
+          example: 2
 
     Prediction:
       type: object
-      required: [home, office]
+      required: [model, home, office]
       properties:
+        model:
+          $ref: "#/components/schemas/ModelInfo"
         home:
-          $ref: "#/components/schemas/Place"
+          $ref: "#/components/schemas/HomeResult"
         office:
-          $ref: "#/components/schemas/Place"
+          $ref: "#/components/schemas/OfficeResult"
 
     UserPrediction:
       allOf:
@@ -237,48 +331,95 @@ components:
           properties:
             code:
               type: string
+              enum: [invalid_request, invalid_point, invalid_time_range, unauthorized, user_not_found, no_points,
+                     model_unavailable, internal_error]
             message:
               type: string
+              description: Mô tả cho người đọc; client chỉ nên rẽ nhánh theo `code`
 
   responses:
     BadRequest:
-      description: Dữ liệu gửi lên không hợp lệ
+      description: |
+        Request không hợp lệ: body sai định dạng hoặc rỗng (`invalid_request`), một điểm sai kiểu / ngoài miền giá trị
+        (`invalid_point`), `start` không trước `end` (`invalid_time_range`).
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/Error"
-          example:
-            error: { code: invalid_point, message: "points[12].lat must be <= 90" }
+          examples:
+            invalidPoint:
+              value:
+                error: { code: invalid_point, message: "points[12].lat must be <= 90" }
+            emptyPoints:
+              value:
+                error: { code: invalid_request, message: "points must contain at least 1 item" }
     Unauthorized:
       description: Thiếu hoặc sai API key
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/Error"
+          example:
+            error: { code: unauthorized, message: "missing or invalid X-API-Key" }
     NotFound:
-      description: User không có trong DB, hoặc không có điểm nào trong khoảng thời gian yêu cầu
+      description: User không có trong DB (`user_not_found`), hoặc không có điểm nào trong khoảng thời gian yêu cầu (`no_points`)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          examples:
+            userNotFound:
+              value:
+                error: { code: user_not_found, message: "user 999 not found" }
+            noPoints:
+              value:
+                error: { code: no_points, message: "user 5 has no points between 2010-01-01T00:00:00Z and 2010-02-01T00:00:00Z" }
+    Unavailable:
+      description: Model chưa nạp xong hoặc mất kết nối DB; thử lại sau
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/Error"
           example:
-            error: { code: user_not_found, message: "user 999 not found" }
+            error: { code: model_unavailable, message: "model is loading" }
+    InternalError:
+      description: Lỗi không lường trước trong server; không trả chi tiết nội bộ
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: { code: internal_error, message: "unexpected error" }
 
   examples:
     Prediction:
+      summary: Có dự đoán cho cả home và office (user 5, stay_point v2, holdout)
       value:
+        model: { name: stay_point, version: 2 }
         home:
           lat: 40.0001537
           lon: 116.3267473
           hours: 115.44
           days: 23
           confidence: 0.535
+          regularity: 0.622
+          margin: 0.070
         office:
           lat: 40.0103650
           lon: 116.3220908
           hours: 53.85
           days: 17
           confidence: 0.535
+          regularity: 0.630
+          margin: 1.0
+    PredictionAbstain:
+      summary: Điểm hợp lệ nhưng không đủ dữ liệu (vd. một ngày, không ở lại qua đêm)
+      value:
+        model: { name: stay_point, version: 2 }
+        home:
+          abstain_reason: no_night_stay
+        office:
+          abstain_reason: insufficient_workdays
     UserPrediction:
       value:
         user_id: 5
@@ -286,15 +427,20 @@ components:
         time_range:
           start: "2008-10-23T02:53:04Z"
           end: "2009-07-05T09:12:37Z"
+        model: { name: stay_point, version: 2 }
         home:
           lat: 40.0001537
           lon: 116.3267473
           hours: 115.44
           days: 23
           confidence: 0.535
+          regularity: 0.622
+          margin: 0.070
         office:
           lat: 40.0103650
           lon: 116.3220908
           hours: 53.85
           days: 17
           confidence: 0.535
+          regularity: 0.630
+          margin: 1.0
