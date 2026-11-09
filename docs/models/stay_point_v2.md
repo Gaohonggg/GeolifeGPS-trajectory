@@ -4,9 +4,9 @@
 | --- | --- |
 | **Model** | GPS → stay (**neo động**) → place → home / office |
 | **Dữ liệu** | preprocess `v_1` ([preprocess_v1.md](../preprocess_v1.md)) |
-| **Tham số** | [`models/stay_point/v_2/config.yaml`](../../models/stay_point/v_2/config.yaml) |
-| **Tái lập** | [`models/stay_point/v_2/tuning.ipynb`](../../models/stay_point/v_2/tuning.ipynb): mọi bảng / hình dưới đây, chỉ chạy trên `dev` (135 user) |
-| **Code** | [`stays.py`](../../src/geolife/stays.py) (`_stays_centroid_anchor`), các bước sau như v_1; phép đo tuning: [`tuning.py`](../../src/geolife/tuning.py) |
+| **Tham số** | [`models_tuning/stay_point/v_2/config.yaml`](../../models_tuning/stay_point/v_2/config.yaml) |
+| **Tái lập** | [`models_tuning/stay_point/v_2/tuning.ipynb`](../../models_tuning/stay_point/v_2/tuning.ipynb): mọi bảng / hình dưới đây, chỉ chạy trên `dev` (135 user) |
+| **Code** | [`models/stay_point.py`](../../src/geolife/models/stay_point.py) (`_stays_centroid_anchor`), các bước sau như v_1; phép đo tuning: [`tuning/stay_point.py`](../../src/geolife/tuning/stay_point.py), [`tuning/common.py`](../../src/geolife/tuning/common.py) |
 | **Chỉ số** | Định nghĩa ở [evaluation.md](../evaluation.md) |
 | **Quy trình chọn** | Cùng các bước B1–B8 và **cùng quy tắc chọn** với [stay_point_v1.md](stay_point_v1.md). Quy tắc được giữ nguyên, không đổi theo kết quả của v_2 |
 

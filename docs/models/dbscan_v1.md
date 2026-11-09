@@ -4,9 +4,9 @@
 | --- | --- |
 | **Model** | GPS → trọng số thời gian → ô lưới → DBSCAN (mỗi cụm là một place) → visit → home / office |
 | **Dữ liệu** | preprocess `v_1` ([preprocess_v1.md](../preprocess_v1.md)) |
-| **Tham số** | [`models/dbscan/v_1/config.yaml`](../../models/dbscan/v_1/config.yaml) |
-| **Tái lập** | [`models/dbscan/v_1/tuning.ipynb`](../../models/dbscan/v_1/tuning.ipynb): mọi bảng dưới đây, chỉ chạy trên `dev` (135 user) |
-| **Code** | [`clusters.py`](../../src/geolife/clusters.py), [`home_office.py`](../../src/geolife/home_office.py), [`calendar.py`](../../src/geolife/calendar.py) |
+| **Tham số** | [`models_tuning/dbscan/v_1/config.yaml`](../../models_tuning/dbscan/v_1/config.yaml) |
+| **Tái lập** | [`models_tuning/dbscan/v_1/tuning.ipynb`](../../models_tuning/dbscan/v_1/tuning.ipynb): mọi bảng dưới đây, chỉ chạy trên `dev` (135 user) |
+| **Code** | [`models/dbscan.py`](../../src/geolife/models/dbscan.py), [`home_office.py`](../../src/geolife/home_office.py), [`calendar.py`](../../src/geolife/calendar.py) |
 | **Chỉ số** | Định nghĩa ở [evaluation.md](../evaluation.md), tính trên visit như trên stay |
 
 | Tham số | Giá trị | Bước |

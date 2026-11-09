@@ -4,9 +4,9 @@
 | --- | --- |
 | **Model** | GPS → stay ([Li et al., 2008](#nguồn)) → place → home / office |
 | **Dữ liệu** | preprocess `v_1` ([preprocess_v1.md](../preprocess_v1.md)) |
-| **Tham số** | [`models/stay_point/v_1/config.yaml`](../../models/stay_point/v_1/config.yaml) |
-| **Tái lập** | [`models/stay_point/v_1/tuning.ipynb`](../../models/stay_point/v_1/tuning.ipynb): mọi bảng / hình dưới đây, chỉ chạy trên `dev` (135 user) |
-| **Code** | [`stays.py`](../../src/geolife/stays.py), [`places.py`](../../src/geolife/places.py), [`home_office.py`](../../src/geolife/home_office.py), [`calendar.py`](../../src/geolife/calendar.py) |
+| **Tham số** | [`models_tuning/stay_point/v_1/config.yaml`](../../models_tuning/stay_point/v_1/config.yaml) |
+| **Tái lập** | [`models_tuning/stay_point/v_1/tuning.ipynb`](../../models_tuning/stay_point/v_1/tuning.ipynb): mọi bảng / hình dưới đây, chỉ chạy trên `dev` (135 user) |
+| **Code** | [`models/stay_point.py`](../../src/geolife/models/stay_point.py) (stay, place), [`home_office.py`](../../src/geolife/home_office.py), [`calendar.py`](../../src/geolife/calendar.py) |
 | **Chỉ số** | Định nghĩa ở [evaluation.md](../evaluation.md) |
 
 | Tham số | Giá trị | Bước |

@@ -14,10 +14,10 @@ Từ quỹ đạo GPS của bộ [GeoLife Trajectories 1.3](https://www.microsof
 
 | Đường dẫn | Nội dung |
 | --- | --- |
-| `src/geolife/` | Toàn bộ code, theo thứ tự pipeline: `io`, `preprocess`, `timezone`, `calendar`, `stays`, `places`, `clusters`, `home_office`, `models/`, `evaluation`, `run`; `confidence` tính confidence cho từng dự đoán; `tuning` chứa các phép đo dùng chung khi chọn tham số |
+| `src/geolife/` | Toàn bộ code, theo thứ tự pipeline: `io`, `preprocess`, `timezone`, `calendar`, `models/` (mỗi model một file chứa thuật toán của nó: `stay_point`, `dbscan`; `base` là interface và hợp đồng dữ liệu chung), `home_office`, `confidence`, `evaluation`, `run`; `tuning/` chứa các phép đo khi chọn tham số (`common` dùng chung, mỗi model một file) |
 | `EDA/` | Notebook `01`–`05`, chỉ phân tích dữ liệu thô (đọc thẳng file `.plt`). Hình ở `EDA/figures/` |
 | `preprocess/v_<n>/` | `config.yaml` + `preprocess.ipynb` (gọi hàm trong `src/geolife/preprocess.py`, in mẫu kiểm tra sau mỗi bước) |
-| `models/<tên>/v_<k>/` | `config.yaml` (tham số + version dữ liệu) + `tuning.ipynb` (cách chọn từng tham số, chạy trên `dev`) |
+| `models_tuning/<tên>/v_<k>/` | `config.yaml` (tham số + version dữ liệu) + `tuning.ipynb` (cách chọn từng tham số, chạy trên `dev`) |
 | `results/data_v<n>/<tên>_v<k>/<split>/` | `predictions.csv`, `metrics.json` của một lần chạy |
 | `docs/` | Tài liệu, đọc theo thứ tự bên dưới |
 | `data/` | Không commit. `Geolife_Trajectories/` là dữ liệu gốc; `preprocess/v_<n>/` là output của từng version preprocess |
@@ -48,7 +48,7 @@ uv run jupyter nbconvert --to notebook --execute --inplace preprocess/v_1/prepro
 ```
 
 ```bash
-uv run jupyter nbconvert --to notebook --execute --inplace models/stay_point/v_1/tuning.ipynb
+uv run jupyter nbconvert --to notebook --execute --inplace models_tuning/stay_point/v_1/tuning.ipynb
 ```
 
 ```bash

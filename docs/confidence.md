@@ -3,7 +3,7 @@
 | | |
 | --- | --- |
 | **Code** | [`src/geolife/confidence.py`](../src/geolife/confidence.py), được model gọi ngay sau khi chọn home / office (`StayPointModel.label`) |
-| **Tham số** | Khối `confidence` trong `models/<tên>/v_<k>/config.yaml`: `n_boot: 200`, `block: week`, `seed: 0` |
+| **Tham số** | Khối `confidence` trong `models_tuning/<tên>/v_<k>/config.yaml`: `n_boot: 200`, `block: week`, `seed: 0` |
 
 Mỗi lần model dự đoán đều trả về confidence, không có bước chạy riêng. Confidence chỉ đọc bảng lát giờ và bảng place mà model
 đã tạo, nên dùng được cho mọi cách tạo stay (v_1 neo điểm đầu, v_2 neo tâm).

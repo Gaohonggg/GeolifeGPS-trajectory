@@ -4,9 +4,9 @@
 | --- | --- |
 | **Model** | Như [dbscan v_1](dbscan_v1.md), chỉ khác toạ độ đại diện của ô lưới |
 | **Dữ liệu** | preprocess `v_1` ([preprocess_v1.md](../preprocess_v1.md)) |
-| **Tham số** | [`models/dbscan/v_2/config.yaml`](../../models/dbscan/v_2/config.yaml) |
-| **Tái lập** | [`models/dbscan/v_2/tuning.ipynb`](../../models/dbscan/v_2/tuning.ipynb): mọi bảng dưới đây, chỉ chạy trên `dev` (135 user) |
-| **Code** | [`clusters.py`](../../src/geolife/clusters.py) (`CELL_CENTERS`) |
+| **Tham số** | [`models_tuning/dbscan/v_2/config.yaml`](../../models_tuning/dbscan/v_2/config.yaml) |
+| **Tái lập** | [`models_tuning/dbscan/v_2/tuning.ipynb`](../../models_tuning/dbscan/v_2/tuning.ipynb): mọi bảng dưới đây, chỉ chạy trên `dev` (135 user) |
+| **Code** | [`models/dbscan.py`](../../src/geolife/models/dbscan.py) (`CELL_CENTERS`) |
 | **Chỉ số** | Định nghĩa ở [evaluation.md](../evaluation.md), tính trên visit như trên stay |
 
 | Tham số | v_2 | Khác v_1? |
