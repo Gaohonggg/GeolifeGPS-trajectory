@@ -1,6 +1,7 @@
 data/*
 *.zip
 Minimum_checklist.md
+Plan_checkpoint_2_3.md
 .venv/
 __pycache__/
 .ipynb_checkpoints/

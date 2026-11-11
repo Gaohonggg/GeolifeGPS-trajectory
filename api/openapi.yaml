@@ -7,22 +7,22 @@ info:
   title: GeoLife Home/Office API
   version: 1.0.0
   description: |
-    Suy ra home và office kèm confidence, theo hai cách:
-
-    - `POST /predict`: client tự gửi điểm GPS.
-    - `POST /users/{userId}/predictions`: server lấy điểm GPS của user trong DB.
+    Suy ra home và office của một user kèm confidence. Client chỉ gửi `userId`; server lấy điểm GPS của user đó trong DB
+    (`POST /users/{userId}/predictions`).
 
     Quy ước:
     - Thời gian theo ISO 8601, có offset (`2008-10-23T02:53:04Z`).
     - Toạ độ WGS84, độ thập phân.
     - Lỗi trả về dạng `{ "error": { "code", "message" } }`.
     - Mỗi response có `model` (tên và version của model đang serve) để biết kết quả đến từ đâu.
+    - Xác thực bằng OAuth2 / OpenID Connect: client gửi ID token trong header `Authorization: Bearer <token>`.
 
     **Dự đoán và abstain.** Với mỗi role (`home`, `office`), model hoặc trả một place, hoặc từ chối dự đoán (abstain)
     kèm lý do. Hai dạng loại trừ nhau: dự đoán luôn có toạ độ và `confidence`; abstain chỉ có `abstain_reason`.
 
-    **Không đủ dữ liệu không phải là lỗi.** Điểm GPS hợp lệ nhưng quá ít (vd. vài điểm, chỉ đang di chuyển, chưa đủ số
-    đêm) vẫn trả `200`, với role tương ứng là abstain. Lỗi `4xx` chỉ dành cho request sai hoặc không có điểm nào để chạy.
+    **Không đủ dữ liệu không phải là lỗi.** User có điểm GPS trong khoảng thời gian yêu cầu nhưng quá ít (vd. vài điểm,
+    chỉ đang di chuyển, chưa đủ số đêm) vẫn trả `200`, với role tương ứng là abstain. Lỗi `4xx` chỉ dành cho request sai
+    hoặc không có điểm nào để chạy.
 
     | Lý do abstain | Role | Ý nghĩa |
     | --- | --- | --- |
@@ -40,7 +40,7 @@ servers:
     description: Version của API nằm trong đường dẫn; đổi contract không tương thích thì lên /v2
 
 security:
-  - apiKeyAuth: []
+  - googleOidc: []
 
 paths:
   /health:
@@ -70,51 +70,13 @@ paths:
                 model_loaded: true
                 db_connected: false
 
-  /predict:
-    post:
-      summary: Chạy model trên loạt điểm GPS gửi lên
-      operationId: predict
-      description: |
-        Chạy toàn bộ pipeline (preprocess -> stay -> place -> home / office) trên các điểm trong body. Không đọc hay ghi DB.
-        Mọi điểm được coi là của cùng một người. Thứ tự điểm không quan trọng: server sort theo thời gian; điểm trùng
-        thời gian và điểm nhiễu được xử lý như preprocess.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/PredictRequest"
-            example:
-              points:
-                - { time: "2008-10-23T02:53:04Z", lat: 39.984702, lon: 116.318417 }
-                - { time: "2008-10-23T02:53:10Z", lat: 39.984683, lon: 116.318450 }
-      responses:
-        "200":
-          description: Kết quả home / office
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Prediction"
-              examples:
-                predicted:
-                  $ref: "#/components/examples/Prediction"
-                notEnoughData:
-                  $ref: "#/components/examples/PredictionAbstain"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "500":
-          $ref: "#/components/responses/InternalError"
-        "503":
-          $ref: "#/components/responses/Unavailable"
-
   /users/{userId}/predictions:
     post:
       summary: Chạy model trên dữ liệu GPS của user trong DB
       operationId: predictUser
       description: |
-        Server truy vấn điểm GPS của user trong DB (lọc theo `start`, `end` nếu có), chạy pipeline và trả kết quả.
+        Server truy vấn điểm GPS của user trong DB (lọc theo `start`, `end` nếu có), chạy pipeline
+        (stay -> place -> home / office) và trả kết quả. Request không có body.
         Không truyền khoảng thời gian thì dùng toàn bộ dữ liệu của user. `start` phải trước `end` (nếu không: `400`).
         User không có trong DB, hoặc không có điểm nào trong khoảng thời gian: `404`. Có điểm nhưng không đủ để dự đoán:
         `200` kèm abstain.
@@ -144,12 +106,16 @@ paths:
               schema:
                 $ref: "#/components/schemas/UserPrediction"
               examples:
-                user5:
+                predicted:
                   $ref: "#/components/examples/UserPrediction"
+                notEnoughData:
+                  $ref: "#/components/examples/UserPredictionAbstain"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
         "500":
@@ -159,10 +125,13 @@ paths:
 
 components:
   securitySchemes:
-    apiKeyAuth:
-      type: apiKey
-      in: header
-      name: X-API-Key
+    googleOidc:
+      type: openIdConnect
+      openIdConnectUrl: https://accounts.google.com/.well-known/openid-configuration
+      description: |
+        Đăng nhập bằng Google (OAuth2 authorization code + PKCE, scope `openid email`) để lấy ID token, rồi gửi token đó
+        trong header `Authorization: Bearer <token>`. Server kiểm chữ ký, `iss`, `aud`, `exp` của token (sai: `401`) và
+        kiểm tài khoản có nằm trong danh sách được phép gọi API không (không: `403`).
 
   schemas:
     UserId:
@@ -181,32 +150,6 @@ components:
           type: boolean
         db_connected:
           type: boolean
-
-    GpsPoint:
-      type: object
-      required: [time, lat, lon]
-      properties:
-        time:
-          type: string
-          format: date-time
-        lat:
-          type: number
-          minimum: -90
-          maximum: 90
-        lon:
-          type: number
-          minimum: -180
-          maximum: 180
-
-    PredictRequest:
-      type: object
-      required: [points]
-      properties:
-        points:
-          type: array
-          minItems: 1
-          items:
-            $ref: "#/components/schemas/GpsPoint"
 
     HomeResult:
       description: Kết quả cho home. Hoặc dự đoán, hoặc abstain.
@@ -314,6 +257,7 @@ components:
               description: Số điểm GPS lấy từ DB để chạy model
             time_range:
               type: object
+              description: Thời điểm của điểm đầu và điểm cuối thực sự được dùng
               required: [start, end]
               properties:
                 start:
@@ -334,7 +278,7 @@ components:
           properties:
             code:
               type: string
-              enum: [invalid_request, invalid_point, invalid_time_range, unauthorized, user_not_found, no_points,
+              enum: [invalid_request, invalid_time_range, unauthorized, forbidden, user_not_found, no_points,
                      model_unavailable, internal_error]
             message:
               type: string
@@ -343,27 +287,35 @@ components:
   responses:
     BadRequest:
       description: |
-        Request không hợp lệ: body sai định dạng hoặc rỗng (`invalid_request`), một điểm sai kiểu / ngoài miền giá trị
-        (`invalid_point`), `start` không trước `end` (`invalid_time_range`).
+        Request không hợp lệ: `userId` không phải số nguyên không âm, hoặc `start` / `end` sai định dạng thời gian
+        (`invalid_request`); `start` không trước `end` (`invalid_time_range`).
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/Error"
           examples:
-            invalidPoint:
+            invalidRequest:
               value:
-                error: { code: invalid_point, message: "points[12].lat must be <= 90" }
-            emptyPoints:
+                error: { code: invalid_request, message: "start must be an ISO 8601 date-time with offset" }
+            invalidTimeRange:
               value:
-                error: { code: invalid_request, message: "points must contain at least 1 item" }
+                error: { code: invalid_time_range, message: "start must be before end" }
     Unauthorized:
-      description: Thiếu hoặc sai API key
+      description: Thiếu token, token sai chữ ký, sai `iss` / `aud`, hoặc đã hết hạn
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/Error"
           example:
-            error: { code: unauthorized, message: "missing or invalid X-API-Key" }
+            error: { code: unauthorized, message: "missing or invalid bearer token" }
+    Forbidden:
+      description: Token hợp lệ nhưng tài khoản không nằm trong danh sách được phép gọi API
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: { code: forbidden, message: "account is not allowed to call this API" }
     NotFound:
       description: User không có trong DB (`user_not_found`), hoặc không có điểm nào trong khoảng thời gian yêu cầu (`no_points`)
       content:
@@ -395,35 +347,8 @@ components:
             error: { code: internal_error, message: "unexpected error" }
 
   examples:
-    Prediction:
-      summary: Có dự đoán cho cả home và office (user 5, stay_point v2, holdout)
-      value:
-        model: { name: stay_point, version: 2 }
-        home:
-          lat: 40.0001537
-          lon: 116.3267473
-          hours: 115.44
-          days: 23
-          confidence: 0.535
-          regularity: 0.622
-          margin: 0.070
-        office:
-          lat: 40.0103650
-          lon: 116.3220908
-          hours: 53.85
-          days: 17
-          confidence: 0.535
-          regularity: 0.630
-          margin: 1.0
-    PredictionAbstain:
-      summary: Điểm hợp lệ nhưng không đủ dữ liệu (vd. một ngày, không ở lại qua đêm)
-      value:
-        model: { name: stay_point, version: 2 }
-        home:
-          abstain_reason: no_night_stay
-        office:
-          abstain_reason: insufficient_workdays
     UserPrediction:
+      summary: Có dự đoán cho cả home và office (user 5, stay_point v2, holdout)
       value:
         user_id: 5
         n_points: 108607
@@ -447,3 +372,16 @@ components:
           confidence: 0.535
           regularity: 0.630
           margin: 1.0
+    UserPredictionAbstain:
+      summary: Có điểm trong khoảng thời gian yêu cầu nhưng không đủ để dự đoán (số liệu minh hoạ, vd. chỉ một ngày, không ở lại qua đêm)
+      value:
+        user_id: 5
+        n_points: 1520
+        time_range:
+          start: "2008-10-23T02:53:04Z"
+          end: "2008-10-23T11:11:12Z"
+        model: { name: stay_point, version: 2 }
+        home:
+          abstain_reason: no_night_stay
+        office:
+          abstain_reason: insufficient_workdays
