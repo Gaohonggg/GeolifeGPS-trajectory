@@ -10,6 +10,7 @@ from .base import Model, load_config
 from .dbscan import DbscanModel
 from .stay_point import StayPointModel
 
+# Thứ tự = thứ tự phát triển; `geolife.register` đăng ký lên MLflow theo thứ tự này. Thuật toán mới thêm vào cuối.
 REGISTRY: dict[str, type[Model]] = {m.name: m for m in [StayPointModel, DbscanModel]}
 
 
