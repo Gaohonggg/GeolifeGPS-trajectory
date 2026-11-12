@@ -1,0 +1,8 @@
+# Context là gốc repo: chỉ gửi những gì Dockerfile cần (data/ và file zip vài GB)
+*
+!pyproject.toml
+!uv.lock
+!src/geolife_api/
+!db/migrations/
+!docs/openapi.yaml
+**/__pycache__

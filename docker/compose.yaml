@@ -1,0 +1,52 @@
+# Stack local: Postgres + MLflow (tracking + registry) + API.
+#   make up        # postgres, mlflow
+#   make api       # build + chạy API (MODEL_URI trong docker/.env)
+# Biến môi trường đọc từ docker/.env (tạo từ docker/.env.example).
+name: geolife
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: geolife
+      POSTGRES_USER: geolife
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in docker/.env}
+    ports: ["5432:5432"]
+    volumes: [postgres:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U geolife -d geolife"]
+      interval: 5s
+      retries: 10
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v3.18.0
+    command: >
+      mlflow server --host 0.0.0.0 --port 5000
+      --backend-store-uri sqlite:////mlflow/mlflow.db
+      --artifacts-destination /mlflow/artifacts
+      --allowed-hosts mlflow:5000,localhost:*,127.0.0.1:*
+    # --allowed-hosts: MLflow chặn Host header lạ (chống DNS rebinding); container API gọi tới bằng tên mlflow:5000
+    ports: ["5001:5000"]   # 5000 trên macOS thường bị AirPlay chiếm
+    volumes: [mlflow:/mlflow]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      interval: 5s
+      retries: 20
+
+  api:
+    build:
+      context: ..
+      dockerfile: docker/api.Dockerfile
+    image: geolife-api:local
+    environment:
+      DATABASE_URL: postgresql://geolife:${POSTGRES_PASSWORD}@postgres:5432/geolife
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MODEL_URI: ${MODEL_URI:?set MODEL_URI in docker/.env}
+    ports: ["8000:8000"]
+    depends_on:
+      postgres: {condition: service_healthy}
+      mlflow: {condition: service_healthy}
+
+volumes:
+  postgres:
+  mlflow:

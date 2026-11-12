@@ -10,3 +10,5 @@ __pycache__/
 EDA/outputs/02_beijing_heatmap.html
 
 slides/*
+# stack docker local
+docker/.env
