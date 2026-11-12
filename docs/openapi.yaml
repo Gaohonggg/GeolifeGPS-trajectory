@@ -232,7 +232,7 @@ components:
           example: stay_point
         version:
           type: integer
-          example: 2
+          example: 1
 
     Prediction:
       type: object
@@ -279,7 +279,7 @@ components:
             code:
               type: string
               enum: [invalid_request, invalid_time_range, unauthorized, forbidden, user_not_found, no_points,
-                     model_unavailable, internal_error]
+                     model_unavailable, db_unavailable, internal_error]
             message:
               type: string
               description: Mô tả cho người đọc; client chỉ nên rẽ nhánh theo `code`
@@ -330,13 +330,18 @@ components:
               value:
                 error: { code: no_points, message: "user 5 has no points between 2010-01-01T00:00:00Z and 2010-02-01T00:00:00Z" }
     Unavailable:
-      description: Model chưa nạp xong hoặc mất kết nối DB; thử lại sau
+      description: Model chưa nạp xong (`model_unavailable`) hoặc mất kết nối DB (`db_unavailable`); thử lại sau
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/Error"
-          example:
-            error: { code: model_unavailable, message: "model is loading" }
+          examples:
+            modelLoading:
+              value:
+                error: { code: model_unavailable, message: "model is loading" }
+            dbDown:
+              value:
+                error: { code: db_unavailable, message: "database is unavailable" }
     InternalError:
       description: Lỗi không lường trước trong server; không trả chi tiết nội bộ
       content:
@@ -348,39 +353,41 @@ components:
 
   examples:
     UserPrediction:
-      summary: Có dự đoán cho cả home và office (user 5, stay_point v2, holdout)
+      summary: Có dự đoán cho cả home và office (user 5, toàn bộ dữ liệu, stay_point v1)
       value:
         user_id: 5
-        n_points: 108607
+        n_points: 109040
         time_range:
-          start: "2008-10-23T02:53:04Z"
-          end: "2009-07-05T09:12:37Z"
-        model: { name: stay_point, version: 2 }
+          start: "2008-10-24T04:12:30Z"
+          end: "2009-03-19T05:46:37Z"
+        model: { name: stay_point, version: 1 }
         home:
-          lat: 40.0001537
-          lon: 116.3267473
-          hours: 115.44
-          days: 23
-          confidence: 0.535
-          regularity: 0.622
-          margin: 0.070
+          lat: 40.0106879
+          lon: 116.3219049
+          hours: 115.43
+          days: 25
+          confidence: 0.55
+          regularity: 0.676
+          margin: 0.001
         office:
-          lat: 40.0103650
-          lon: 116.3220908
-          hours: 53.85
-          days: 17
-          confidence: 0.535
-          regularity: 0.630
-          margin: 1.0
+          lat: 40.0002048
+          lon: 116.3269257
+          hours: 76.07
+          days: 18
+          confidence: 0.55
+          regularity: 0.667
+          margin: 0.976
     UserPredictionAbstain:
-      summary: Có điểm trong khoảng thời gian yêu cầu nhưng không đủ để dự đoán (số liệu minh hoạ, vd. chỉ một ngày, không ở lại qua đêm)
+      summary: |
+        Có điểm nhưng không đủ để dự đoán: user 5, chỉ một ngày, không ở lại qua đêm
+        (`?start=2008-11-10T00:00:00Z&end=2008-11-11T00:00:00Z`, stay_point v1)
       value:
         user_id: 5
-        n_points: 1520
+        n_points: 987
         time_range:
-          start: "2008-10-23T02:53:04Z"
-          end: "2008-10-23T11:11:12Z"
-        model: { name: stay_point, version: 2 }
+          start: "2008-11-10T07:51:39Z"
+          end: "2008-11-10T12:26:47Z"
+        model: { name: stay_point, version: 1 }
         home:
           abstain_reason: no_night_stay
         office:
