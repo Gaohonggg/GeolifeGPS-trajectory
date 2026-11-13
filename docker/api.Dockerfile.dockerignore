@@ -1,4 +1,4 @@
-# Context là gốc repo: chỉ gửi những gì Dockerfile cần (data/ và file zip vài GB)
+# Context là gốc repo: chỉ gửi file Dockerfile cần (data/ nặng vài GB)
 *
 !pyproject.toml
 !uv.lock

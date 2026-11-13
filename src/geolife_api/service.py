@@ -1,4 +1,4 @@
-"""Logic của endpoint dự đoán, tách khỏi phần HTTP để worker / handler khác gọi lại được."""
+"""Logic endpoint dự đoán, không phụ thuộc HTTP."""
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -11,7 +11,7 @@ from .model import LoadedModel
 
 
 def parse_time(name: str, value: str | None) -> datetime | None:
-    """Chuỗi ISO 8601 có offset (`2008-10-23T02:53:04Z`). Không nhận số (Unix timestamp) hay thời điểm thiếu offset."""
+    """ISO 8601 bắt buộc có offset (`2008-10-23T02:53:04Z`); không nhận Unix timestamp."""
     if value is None:
         return None
     try:
@@ -21,7 +21,7 @@ def parse_time(name: str, value: str | None) -> datetime | None:
     if t.tzinfo is None:
         raise ApiError(400, "invalid_request", f"{name} must include a UTC offset, e.g. 2008-10-23T02:53:04Z")
     try:
-        # đổi về UTC trước khi gửi xuống DB: Postgres không nhận offset ngoài ±15:59 (Python nhận tới ±23:59)
+        # Postgres chỉ nhận offset tới ±15:59, Python nhận tới ±23:59
         return t.astimezone(UTC)
     except OverflowError:
         raise ApiError(400, "invalid_request", f"{name} is out of range") from None

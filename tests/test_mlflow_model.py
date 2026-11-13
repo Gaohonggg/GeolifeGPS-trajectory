@@ -9,15 +9,18 @@ from geolife import register
 from geolife.models import load_model
 from geolife_api.model import load, synthetic_points
 
-URI = f"models:/{register.MODEL_NAME}"
+NAME = "geolife_home_office"
+URI = f"models:/{NAME}"
 
 
 @pytest.fixture
 def local_registry(tmp_path, monkeypatch):
-    # mlflow-skinny không có backend sqlite, nên test dùng file store (MLflow 3 phải bật cờ mới cho dùng)
+    # mlflow-skinny không có backend sqlite: dùng file store (MLflow 3 cần bật cờ)
     uri = (tmp_path / "mlruns").as_uri()
     monkeypatch.setenv("MLFLOW_ALLOW_FILE_STORE", "true")
     monkeypatch.setenv("MLFLOW_TRACKING_URI", uri)
+    monkeypatch.setenv("MLFLOW_EXPERIMENT_NAME", NAME)
+    monkeypatch.setenv("MLFLOW_MODEL_NAME", NAME)
     mlflow.set_tracking_uri(uri)
     mlflow.set_registry_uri(uri)
     yield mlflow.MlflowClient()
@@ -49,7 +52,7 @@ def test_register_without_eval(local_registry, monkeypatch):
     # chưa có kết quả holdout: vẫn đăng ký, chỉ không có metric
     monkeypatch.setattr(register, "load_metrics", lambda *a: None)
     assert register.register("stay_point", 1, local_registry) == "1"
-    run = local_registry.get_run(local_registry.get_model_version(register.MODEL_NAME, "1").run_id)
+    run = local_registry.get_run(local_registry.get_model_version(NAME, "1").run_id)
     assert run.data.metrics == {}
 
 

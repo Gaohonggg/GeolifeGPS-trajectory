@@ -1,7 +1,6 @@
 # syntax=docker/dockerfile:1
-# Image của API: chỉ chứa thư viện (nhóm `serving` + thư viện thuật toán) và package geolife_api.
-# Code thuật toán (geolife) không nằm trong image: nó đi kèm model version, tải từ MLflow registry lúc khởi động.
-# Build từ gốc repo:  docker build -f docker/api.Dockerfile .
+# Image API: thư viện nhóm `serving` + package geolife_api. Code thuật toán đi kèm model version trong registry.
+# Build từ gốc repo: docker build -f docker/api.Dockerfile .
 
 FROM ghcr.io/astral-sh/uv:0.11.18 AS uv
 

@@ -10,20 +10,20 @@ from psycopg import Connection, Error, sql
 from psycopg_pool import ConnectionPool, PoolTimeout
 from pyarrow import csv
 
-# Kiểu cột giống points.parquet, là input của model (geolife.models.base.POINT_COLS)
+# input của model (geolife.models.base.POINT_COLS)
 POINT_TYPES = {"user": pa.int32(), "ts_utc": pa.timestamp("us"), "ts_local": pa.timestamp("us"), "tz": pa.string(),
                "lat": pa.float64(), "lon": pa.float64()}
 
 
 def _configure(conn: Connection) -> None:
-    # timestamptz đọc / ghi theo UTC, không phụ thuộc cấu hình server
+    # timestamptz luôn theo UTC, không phụ thuộc cấu hình server
     conn.execute("SET TIME ZONE 'UTC'")
     conn.commit()
 
 
 class Database:
     def __init__(self, url: str, pool_size: int = 4):
-        # open=False: app vẫn khởi động được khi DB chưa sẵn sàng; /health báo db_connected = false
+        # open=False: app vẫn khởi động khi DB chưa lên
         self.pool = ConnectionPool(url, min_size=1, max_size=pool_size, configure=_configure, open=False)
 
     def open(self) -> None:
@@ -45,10 +45,9 @@ class Database:
             return conn.execute("SELECT 1 FROM users WHERE user_id = %s", (user_id,)).fetchone() is not None
 
     def fetch_points(self, user_id: int, start: datetime | None = None, end: datetime | None = None) -> pd.DataFrame:
-        """Điểm của user trong [start, end), sort theo thời gian; ts_utc trả về dạng naive UTC như points.parquet.
+        """Điểm trong [start, end), sort theo thời gian, ts_utc dạng naive UTC.
 
-        Đọc bằng COPY ... TO STDOUT (CSV) rồi parse bằng pyarrow: nhanh hơn nhiều so với fetch từng dòng khi user có
-        hàng triệu điểm.
+        Dùng COPY + pyarrow thay vì fetch từng dòng: một user có thể có hàng triệu điểm.
         """
         where = [sql.SQL("user_id = {}").format(sql.Literal(user_id))]
         if start is not None:
@@ -66,6 +65,4 @@ class Database:
                     buf.write(chunk)
         buf.seek(0)
         table = csv.read_csv(buf, convert_options=csv.ConvertOptions(column_types=POINT_TYPES))
-        df = table.to_pandas()
-        df["tz"] = df["tz"].astype("category")
-        return df
+        return table.to_pandas()   # tz giữ dạng chuỗi: signature không nhận category

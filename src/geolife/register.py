@@ -1,19 +1,10 @@
 """Đăng ký model version đã eval vào MLflow Model Registry.
 
     uv run python -m geolife.register --model dbscan --version 3
-    uv run python -m geolife.register     # mọi version chưa đăng ký
+    uv run python -m geolife.register        # mọi version chưa đăng ký
 
-Mọi thuật toán chung một registered model (`MODEL_NAME`), nên API chỉ cần đổi version trong
-`models:/geolife_home_office/<version>`. Version của registry là số thứ tự đăng ký; version nào ứng với thuật toán và
-config nào thì xem tag `algorithm`, `config_version` của version đó (hoặc metadata của model).
-
-Quy trình cho một model version mới: notebook `models_tuning/<tên>/v_<k>/tuning.ipynb` chọn tham số, rồi ô cuối của
-notebook eval holdout (`geolife.run`) và gọi lệnh này. Lệnh từ chối nếu kết quả holdout không chạy bằng đúng tham số
-trong config (config bị sửa sau khi eval). Version đã đăng ký thì bỏ qua; cùng một thuật toán phải đăng ký theo thứ tự v_1, v_2, … Thuật toán mới chỉ cần có
-trong `models.REGISTRY` và có thư mục `models_tuning/<tên>/`, không phải sửa file này.
-
-Mỗi version gắn với một run ghi: tham số của config, chỉ số chính trên holdout (`main_metrics`), metrics.json của dev
-và holdout, `data_version`, git commit.
+Mọi thuật toán chung một registered model (`MLFLOW_MODEL_NAME`); tag `algorithm`, `config_version` của mỗi version
+cho biết nó ứng với config nào. Cấu hình MLflow đọc từ môi trường, thiếu thì lấy từ `.env`.
 """
 from __future__ import annotations
 
@@ -25,18 +16,34 @@ from importlib.metadata import version as pkg_version
 
 import mlflow
 from mlflow.exceptions import MlflowException
+from mlflow.models import infer_signature
 from mlflow.tracking import MlflowClient
 
+from . import io
 from .mlflow_model import HomeOfficeModel
 from .models import REGISTRY, load_config
-from .models.base import config_path
+from .models.base import POINT_COLS, config_path
 from .paths import ROOT, results_dir
 
-MODEL_NAME = "geolife_home_office"
-LOCAL_MLFLOW = "http://localhost:5001"
-EXPERIMENT = os.environ.get("MLFLOW_EXPERIMENT_NAME", MODEL_NAME)
-# Thư viện mà code thuật toán cần khi nạp lại model (đồng bộ với [project].dependencies trong pyproject.toml)
+SIGNATURE_USER = 5   # có cả home và office
+# khớp [project].dependencies trong pyproject.toml
 REQUIREMENTS = ["holidays", "numba", "numpy", "pandas", "pyyaml", "scikit-learn", "scipy", "timezonefinder", "tzdata"]
+
+
+def load_env_file(path=ROOT / ".env") -> None:
+    """Nạp `.env` cho các biến chưa có trong môi trường."""
+    if not path.exists():
+        return
+    for line in path.read_text().splitlines():
+        key, sep, value = line.partition("=")
+        if sep and not key.lstrip().startswith("#"):
+            os.environ.setdefault(key.strip(), value.strip())
+
+
+def env(key: str) -> str:
+    if not os.environ.get(key):
+        raise SystemExit(f"chưa đặt {key} (thêm vào .env, xem .env.example)")
+    return os.environ[key]
 
 
 def flatten(d: dict, prefix: str = "") -> dict:
@@ -63,8 +70,7 @@ def load_metrics(name: str, version: int, data_version: int, split: str) -> dict
 
 
 def main_metrics(m: dict) -> dict[str, float]:
-    """Chỉ số chính trên holdout (docs/evaluation.md): stay (tỉ lệ tạo stay, stay giả, phân mảnh, stay dài) và độ phủ
-    home / office. Chỉ số không đo được (null) thì không ghi. metrics.json đầy đủ của dev và holdout đính kèm vào run."""
+    """Chỉ số chính trên holdout (docs/evaluation.md), bỏ chỉ số null."""
     stay, ho = m["stay"], m["home_office"]
     out = {
         "stays_per_day": stay["stays_per_day"],
@@ -77,11 +83,14 @@ def main_metrics(m: dict) -> dict[str, float]:
 
 
 def registered(client: MlflowClient) -> dict[tuple[str, int], str]:
-    """(thuật toán, config version) → version trong registry, đọc từ tag của các version đã đăng ký."""
+    """(thuật toán, config version) → version trong registry."""
+    name = env("MLFLOW_MODEL_NAME")
     try:
-        versions = client.search_model_versions(f"name='{MODEL_NAME}'")
+        found = client.search_model_versions(f"name='{name}'")
     except MlflowException:
         return {}
+    # Unity Catalog không trả tag khi search
+    versions = [client.get_model_version(name, v.version) for v in found]
     return {(v.tags["algorithm"], int(v.tags["config_version"])): str(v.version)
             for v in versions if "algorithm" in v.tags and "config_version" in v.tags}
 
@@ -90,8 +99,17 @@ def config_versions(name: str) -> list[int]:
     return sorted(int(p.name.removeprefix("v_")) for p in (ROOT / "models_tuning" / name).glob("v_*"))
 
 
+def signature(cfg: dict):
+    """Schema input / output, suy ra từ một user thật."""
+    points = io.load_points(cfg["data_version"], users=[SIGNATURE_USER])[POINT_COLS]
+    points["user"] = points["user"].astype("int64")   # long: nhận cả input int16 / int32
+    _, pred = REGISTRY[cfg["name"]].from_config(cfg).predict(points)
+    return infer_signature(points, pred)
+
+
 def register(name: str, version: int, client: MlflowClient) -> str:
-    """Đăng ký `name` v_`version` (đã eval holdout); trả về version trong registry."""
+    """Trả về version trong registry; đã đăng ký thì bỏ qua."""
+    model_name = env("MLFLOW_MODEL_NAME")
     done = registered(client)
     if (name, version) in done:
         print(f"{name} v{version}: đã có (registry version {done[name, version]}), bỏ qua")
@@ -107,7 +125,7 @@ def register(name: str, version: int, client: MlflowClient) -> str:
         raise SystemExit(f"{name} v{version}: kết quả holdout không chạy bằng tham số hiện tại của config, chạy lại eval")
 
     tags = {"algorithm": name, "config_version": str(version), "data_version": str(dv)}
-    mlflow.set_experiment(EXPERIMENT)
+    mlflow.set_experiment(env("MLFLOW_EXPERIMENT_NAME"))
     with mlflow.start_run(run_name=f"{name}_v{version}"):
         mlflow.set_tags({**tags, **git_info()})
         mlflow.log_params({k: str(v) for k, v in flatten(cfg["params"]).items()})
@@ -123,10 +141,11 @@ def register(name: str, version: int, client: MlflowClient) -> str:
             artifacts={"config": str(config_path(name, version))},
             code_paths=[str(ROOT / "src" / "geolife")],
             pip_requirements=[f"{p}=={pkg_version(p)}" for p in REQUIREMENTS],
+            signature=signature(cfg),
             metadata={"algorithm": name, "version": version, "data_version": dv},
         )
-        mv = mlflow.register_model(info.model_uri, MODEL_NAME, tags=tags)
-    print(f"{name} v{version}: đã đăng ký thành {MODEL_NAME} version {mv.version} (run {info.run_id})")
+        mv = mlflow.register_model(info.model_uri, model_name, tags=tags)
+    print(f"{name} v{version}: đã đăng ký thành {model_name} version {mv.version} (run {info.run_id})")
     return str(mv.version)
 
 
@@ -138,13 +157,13 @@ def main(argv=None):
     if bool(a.model) != bool(a.version):
         ap.error("--model và --version phải đi cùng nhau")
 
-    # mặc định là MLflow của stack local (docker/compose.yaml); đặt MLFLOW_TRACKING_URI để dùng server khác
-    mlflow.set_tracking_uri(os.environ.get("MLFLOW_TRACKING_URI", LOCAL_MLFLOW))
+    load_env_file()
+    env("MLFLOW_TRACKING_URI")   # thiếu thì MLflow ghi ra ./mlruns
     client = MlflowClient()
     if a.model:
         register(a.model, a.version, client)
         return
-    # thứ tự của REGISTRY (thuật toán phát triển trước đăng ký trước), trong mỗi thuật toán theo version
+    # theo thứ tự REGISTRY, rồi theo version
     for name in REGISTRY:
         for v in config_versions(name):
             register(name, v, client)

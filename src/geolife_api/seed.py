@@ -1,8 +1,6 @@
-"""Nạp output của preprocess (points.parquet, users.parquet) vào Postgres.
+"""Nạp output của preprocess (points.parquet, users.parquet) vào Postgres bằng COPY theo lô.
 
-    DATABASE_URL=postgresql://... python -m geolife_api.seed --data-dir data/preprocess/v_1 [--split all] [--replace]
-
-Bảng đã có dữ liệu thì dừng, trừ khi có --replace (xoá rồi nạp lại). Điểm được ghi bằng COPY theo từng lô.
+    DATABASE_URL=postgresql://... python -m geolife_api.seed --data-dir data/preprocess/v_1 [--replace]
 """
 from __future__ import annotations
 
@@ -22,7 +20,7 @@ COLUMNS = ["user", "ts_utc", "ts_local", "tz", "lat", "lon"]
 
 
 def seed(url: str, data_dir: Path, split: str = "all", replace: bool = False, batch_size: int = 500_000) -> int:
-    # ignore_metadata: giữ "user" là cột (pandas metadata trong file đặt nó làm index)
+    # ignore_metadata: pandas metadata trong file đặt "user" làm index
     users = pq.read_table(data_dir / "users.parquet", columns=["user", "split"]).to_pandas(ignore_metadata=True)
     if split != "all":
         users = users[users.split == split]

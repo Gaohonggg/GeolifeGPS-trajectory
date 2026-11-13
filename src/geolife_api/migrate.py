@@ -1,8 +1,6 @@
-"""Chạy các file db/migrations/*.sql chưa chạy, theo thứ tự tên file.
+"""Chạy các file db/migrations/*.sql chưa chạy, theo thứ tự tên, mỗi file một transaction.
 
     DATABASE_URL=postgresql://... python -m geolife_api.migrate
-
-File đã chạy được ghi vào bảng `schema_migrations`; mỗi file chạy trong một transaction.
 """
 from __future__ import annotations
 

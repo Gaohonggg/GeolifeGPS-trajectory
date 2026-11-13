@@ -1,9 +1,6 @@
-"""FastAPI app.
+"""FastAPI app: `uvicorn geolife_api.main:app`.
 
-    uvicorn geolife_api.main:app --port 8000
-
-Model được nạp trong một thread nền: trong lúc nạp (hoặc khi MLflow chưa lên), /v1/health trả 503 và endpoint dự đoán
-trả 503 `model_unavailable`. Swagger UI ở /docs hiển thị đúng contract trong docs/openapi.yaml.
+Model nạp ở thread nền; trong lúc chưa nạp xong, /v1/health và endpoint dự đoán trả 503.
 """
 from __future__ import annotations
 
@@ -27,7 +24,7 @@ log = logging.getLogger(__name__)
 
 
 class State:
-    """Những thứ app giữ suốt vòng đời: kết nối DB và model đang serve."""
+    """Kết nối DB và model đang serve."""
 
     def __init__(self, db: Database, model: model_lib.LoadedModel | None = None):
         self.db = db
@@ -69,7 +66,7 @@ def predict(request: Request, user_id: Annotated[int, Path(ge=0)],
 
 
 def create_app(settings: Settings | None = None, state: State | None = None) -> FastAPI:
-    """settings: đọc từ biến môi trường nếu không truyền. state: truyền sẵn (vd. trong test) thì không nạp DB / model."""
+    """`state` truyền sẵn (test) thì bỏ qua bước nạp DB và model."""
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -92,7 +89,7 @@ def create_app(settings: Settings | None = None, state: State | None = None) -> 
     add_handlers(app)
 
     spec_path = settings.openapi_path if settings else Settings.model_fields["openapi_path"].default
-    if spec_path.exists():
+    if spec_path.exists():   # /docs hiển thị đúng contract thay vì schema FastAPI tự sinh
         spec = yaml.safe_load(spec_path.read_text())
         app.openapi = lambda: spec
     return app

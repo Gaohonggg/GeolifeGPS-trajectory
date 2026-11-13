@@ -1,4 +1,4 @@
-"""Test trên stack docker đang chạy (make setup): contract và kết quả end-to-end qua DB + MLflow.
+"""Test trên stack docker đang chạy (make setup): contract và kết quả end-to-end qua DB + registry.
 
     API_URL=http://localhost:8000 uv run pytest -m integration
 """

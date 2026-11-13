@@ -1,4 +1,4 @@
-"""Lỗi của API, trả về dạng `{"error": {"code", "message"}}` (components/schemas/Error trong docs/openapi.yaml)."""
+"""Lỗi API dạng `{"error": {"code", "message"}}` (docs/openapi.yaml)."""
 from __future__ import annotations
 
 import logging
