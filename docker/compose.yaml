@@ -22,8 +22,8 @@ services:
     image: geolife-api:local
     environment:
       DATABASE_URL: postgresql://geolife:${POSTGRES_PASSWORD}@postgres:5432/geolife
-      MLFLOW_TRACKING_URI: databricks
-      MLFLOW_REGISTRY_URI: databricks-uc
+      MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI:?set MLFLOW_TRACKING_URI in .env}
+      MLFLOW_REGISTRY_URI: ${MLFLOW_REGISTRY_URI:?set MLFLOW_REGISTRY_URI in .env}
       DATABRICKS_HOST: ${DATABRICKS_HOST:?set DATABRICKS_HOST in .env}
       DATABRICKS_TOKEN: ${DATABRICKS_TOKEN:?set DATABRICKS_TOKEN in .env}
       MODEL_URI: ${MODEL_URI:?set MODEL_URI in .env}
