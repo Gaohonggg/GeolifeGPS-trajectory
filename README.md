@@ -23,6 +23,7 @@ Từ quỹ đạo GPS của bộ [GeoLife Trajectories 1.3](https://www.microsof
 | `src/geolife_api/` | API theo contract `docs/openapi.yaml`: đọc điểm của user từ Postgres, chạy model version nạp từ MLflow registry trên Databricks (`main` là phần HTTP, `service` là logic, `migrate` / `seed` tạo bảng và nạp dữ liệu) |
 | `db/migrations/` | Schema Postgres, mỗi file một lần thay đổi, chạy theo thứ tự tên |
 | `docker/` | `api.Dockerfile`, `compose.yaml` (Postgres, API) |
+| `scripts/` | `measure_sizing.py`: đo RAM và thời gian của API dưới giới hạn CPU / RAM của một task |
 | `.env.example` | Biến môi trường ở local (stack docker, token Databricks); `make env` copy thành `.env` (không commit) |
 | `tests/` | `test_parity` (chạy từng user khớp kết quả chạy hàng loạt), `test_mlflow_model`, `api/` (HTTP với DB / model giả), `integration/` (với stack đang chạy) |
 | `data/` | Không commit. `Geolife_Trajectories/` là dữ liệu gốc; `preprocess/v_<n>/` là output của từng version preprocess |
@@ -41,6 +42,7 @@ sửa version đó nữa: đổi tham số thì tạo version mới. Config củ
 7. [`docs/confidence.md`](docs/confidence.md): confidence của từng dự đoán home / office (lấy mẫu lại theo tuần), ví dụ cách tính.
 8. [`docs/models/dbscan_v1.md`](docs/models/dbscan_v1.md): model dbscan v1 (DBSCAN trên ô lưới, trọng số thời gian, mỗi cụm là một place; toạ độ ô = tâm hình học), cách chọn từng tham số, kết quả holdout.
 9. [`docs/models/dbscan_v2.md`](docs/models/dbscan_v2.md): model dbscan v2 (toạ độ ô = trung bình có trọng số thời gian của các điểm trong ô), cùng quy trình chọn tham số với dbscan v1.
+10. [`docs/task_sizing.md`](docs/task_sizing.md): RAM và thời gian của API theo số điểm của user và theo cỡ task, dùng để chọn cỡ task khi deploy.
 
 ## Chạy lại
 
