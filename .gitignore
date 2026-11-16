@@ -12,3 +12,4 @@ EDA/outputs/02_beijing_heatmap.html
 slides/*
 # biến môi trường local (mật khẩu, token), không commit
 .env
+geolife-admin_credentials.csv

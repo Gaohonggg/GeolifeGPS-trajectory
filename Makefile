@@ -33,3 +33,33 @@ down:           ## dừng stack, giữ dữ liệu
 
 clean:          ## dừng và xoá dữ liệu Postgres
 	$(COMPOSE) down -v
+
+# ---- AWS  ----
+# aws CLI, Terraform và boto3 đều đọc hai biến này; đổi bằng `make <lệnh> AWS_PROFILE=...`
+export AWS_PROFILE ?= geolife-dev
+export AWS_REGION  ?= ap-southeast-1
+
+# `=` thay vì `:=`: chỉ gọi aws / git khi lệnh cần tới
+AWS_ACCOUNT = $(shell aws sts get-caller-identity --query Account --output text)
+ECR_HOST    = $(AWS_ACCOUNT).dkr.ecr.$(AWS_REGION).amazonaws.com
+ECR_REPO    = $(ECR_HOST)/geolife-api
+GIT_SHA     = $(shell git rev-parse --short=12 HEAD)
+IMAGE       = geolife-api:$(GIT_SHA)
+
+.PHONY: aws-whoami aws-build aws-push aws-publish-model
+
+aws-whoami:     ## tài khoản và user đang dùng
+	aws sts get-caller-identity
+
+aws-build:      ## build image linux/arm64 (Fargate Graviton), tag theo git SHA
+	docker buildx build --platform linux/arm64 -f docker/api.Dockerfile -t $(IMAGE) --load .
+
+aws-push: aws-build  ## push image lên ECR; từ chối khi còn thay đổi chưa commit (tag phải đúng với code)
+	@test -z "$$(git status --porcelain)" || { echo "còn thay đổi chưa commit: tag $(GIT_SHA) sẽ không đúng với image"; exit 1; }
+	aws ecr get-login-password | docker login --username AWS --password-stdin $(ECR_HOST)
+	docker tag $(IMAGE) $(ECR_REPO):$(GIT_SHA)
+	docker push $(ECR_REPO):$(GIT_SHA)
+
+aws-publish-model:  ## sao một version từ registry sang S3 kèm manifest: make aws-publish-model V=4
+	@test -n "$(V)" || { echo "thiếu V, vd. make aws-publish-model V=4"; exit 1; }
+	uv run python -m geolife.publish --version $(V)

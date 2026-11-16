@@ -35,6 +35,7 @@ serving = [
     "pyarrow>=26.0.0",
     "pydantic-settings>=2.16.2",
     "uvicorn>=0.54.0",
+    "boto3>=1.44.3",
 ]
 dev = [
     "httpx>=0.28.1",

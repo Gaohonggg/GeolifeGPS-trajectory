@@ -76,7 +76,7 @@ def create_app(settings: Settings | None = None, state: State | None = None) -> 
             return
         logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
         s = settings or Settings()
-        st = State(Database(s.database_url, s.db_pool_size))
+        st = State(Database(s.db_conninfo, s.db_pool_size))
         st.db.open()
         app.state.geolife = st
         threading.Thread(target=_load_model_forever, args=(st, s.model_uri, s.model_retry_s), daemon=True).start()

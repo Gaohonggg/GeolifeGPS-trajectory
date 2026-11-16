@@ -1,15 +1,15 @@
 """Chạy các file db/migrations/*.sql chưa chạy, theo thứ tự tên, mỗi file một transaction.
 
     DATABASE_URL=postgresql://... python -m geolife_api.migrate
+    (hoặc DB_HOST / DB_NAME / DB_USER / DB_PASSWORD, xem config.DbSettings)
 """
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import psycopg
 
-from .config import APP_ROOT
+from .config import APP_ROOT, DbSettings
 
 MIGRATIONS = APP_ROOT / "db" / "migrations"
 
@@ -32,7 +32,7 @@ def migrate(url: str, folder: Path = MIGRATIONS) -> list[str]:
 
 
 def main():
-    applied = migrate(os.environ["DATABASE_URL"])
+    applied = migrate(DbSettings().db_conninfo)
     print("applied:", ", ".join(applied) if applied else "nothing (up to date)")
 
 
