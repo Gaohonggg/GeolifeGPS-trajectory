@@ -15,7 +15,7 @@ Máy chạy Terraform                              AWS
 bootstrap/main.tf ─────── tạo ────────────────► Bucket S3 chứa state
 bootstrap/terraform.tfstate                      geolife-<account_id>-tfstate
   │                                               │
-  └─ Ghi nhận bucket và cấu hình                   └─ foundation/terraform.tfstate
+  └─ Ghi nhận bucket và cấu hình                  └─ foundation/terraform.tfstate
      do bootstrap quản lý                            Ghi nhận tài nguyên foundation
 ```
 
