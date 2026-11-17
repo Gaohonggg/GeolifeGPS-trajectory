@@ -1,6 +1,6 @@
-# Cảnh báo chi phí: một budget tháng, email khi chi phí thực tế chạm 50% và 100%.
-# include_credit = false: mặc định budget tính sau khi trừ credit, còn credit thì luôn báo 0.
-# Budget chỉ gửi email, không dừng resource nào; số liệu trễ khoảng một ngày.
+# Budget tháng: email khi chi phí thực tế vượt 50% và 100% ngân sách.
+# include_credit = false: tính chi phí trước khi trừ credit, nếu không budget luôn báo 0 khi tài khoản còn credit.
+# Budget chỉ gửi email, không dừng tài nguyên; số liệu chi phí trễ khoảng một ngày.
 
 resource "aws_budgets_budget" "monthly" {
   name         = "${local.name}-monthly"

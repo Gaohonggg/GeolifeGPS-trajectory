@@ -1,6 +1,7 @@
-# Hai role của task (Plan mục 3.5):
-# - execution role: ECS dùng để kéo image, ghi log, đọc secret rồi tiêm vào container
-# - task role: code trong container dùng để gọi AWS. Không ghi được models/.
+# Hai role của ECS task:
+# - execution role: ECS dùng để kéo image, ghi log, đọc secret và tiêm vào container.
+# - task role: code trong container dùng để gọi AWS. Đọc data/, models/, monitoring/; ghi monitoring/, exports/.
+#   Không ghi được models/: chỉ người phát hành model ghi vào đó.
 
 data "aws_iam_policy_document" "ecs_tasks_assume" {
   statement {
@@ -27,7 +28,7 @@ resource "aws_iam_role_policy_attachment" "execution_managed" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
-# mật khẩu DB do RDS sinh và quản lý: secret tên "rds!…" (tạo ở stack data)
+# Mật khẩu DB do RDS sinh và lưu trong Secrets Manager, tên secret bắt đầu bằng "rds!".
 data "aws_iam_policy_document" "execution_secrets" {
   statement {
     actions   = ["secretsmanager:GetSecretValue"]

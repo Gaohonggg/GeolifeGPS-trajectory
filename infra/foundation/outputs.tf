@@ -1,4 +1,4 @@
-# Stack data / serving đọc qua terraform_remote_state.
+# Output dùng cho các stack khác (data, serving) qua terraform_remote_state.
 
 output "region" { value = var.region }
 output "account_id" { value = local.account_id }

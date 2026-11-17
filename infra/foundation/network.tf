@@ -1,5 +1,7 @@
-# 2 public subnet (ALB bắt buộc 2 AZ; task chạy ở đây với public IP) và 2 private subnet không có đường ra
-# internet (RDS). Không có NAT Gateway (Plan mục 3.4).
+# Mạng của dự án, trải trên 2 AZ:
+# - 2 public subnet: ALB (yêu cầu ít nhất 2 AZ) và ECS task (có public IP để ra internet).
+# - 2 private subnet: RDS; không có đường ra internet.
+# Không dùng NAT Gateway: task ở public subnet ra internet trực tiếp, chỉ nhận traffic từ ALB.
 
 data "aws_availability_zones" "available" {
   state = "available"
@@ -26,7 +28,7 @@ resource "aws_subnet" "public" {
   vpc_id            = aws_vpc.main.id
   availability_zone = local.azs[count.index]
   cidr_block        = cidrsubnet(var.vpc_cidr, 8, count.index) # 10.20.0.0/24, 10.20.1.0/24
-  # public IP gán theo từng task (assign_public_ip của ECS service), không gán mặc định
+  # Public IP gán theo từng task qua assign_public_ip của ECS service.
   map_public_ip_on_launch = false
   tags                    = { Name = "${local.name}-public-${local.azs[count.index]}" }
 }
@@ -54,10 +56,10 @@ resource "aws_route_table_association" "public" {
   route_table_id = aws_route_table.public.id
 }
 
-# private subnet dùng route table chính của VPC: chỉ có route nội bộ
+# Private subnet dùng route table chính của VPC (aws_auto_created.tf).
 
-# ---- Security group (Plan mục 3.4) ----
-# Rule vào ALB (cổng 80 từ IP của bạn, sau này từ CloudFront) do stack serving thêm, vì IP đổi theo phiên.
+# ---- Security group: ALB → task (8000) → RDS (5432) ----
+# Rule cho traffic vào ALB nằm ở stack serving, vì nguồn được phép (IP của người dùng) thay đổi theo lần deploy.
 
 resource "aws_security_group" "alb" {
   name        = "${local.name}-alb"
@@ -75,6 +77,7 @@ resource "aws_vpc_security_group_egress_rule" "alb_to_task" {
 
 resource "aws_security_group" "task" {
   name        = "${local.name}-task"
+  # Đổi description buộc AWS tạo lại security group, nên giữ nguyên chuỗi đã tạo.
   description = "ECS task: vao tu ALB, ra internet (ECR, S3, Databricks khong can)"
   vpc_id      = aws_vpc.main.id
 }
@@ -87,7 +90,7 @@ resource "aws_vpc_security_group_ingress_rule" "task_from_alb" {
   to_port                      = 8000
 }
 
-# kéo image ECR, đọc S3, ghi log, tới RDS: đều qua HTTPS hoặc 5432
+# Task cần ra ngoài để kéo image (ECR), đọc S3, ghi log và kết nối RDS.
 resource "aws_vpc_security_group_egress_rule" "task_all" {
   security_group_id = aws_security_group.task.id
   cidr_ipv4         = "0.0.0.0/0"

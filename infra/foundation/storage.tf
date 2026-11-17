@@ -1,5 +1,9 @@
-# Bucket artifacts (Plan mục 3.2): data/preprocess, models/<model>/v=<n>/, monitoring/, exports/.
-# Mọi thứ gắn với số version, không có alias. Không có lifecycle xoá models/.
+# Bucket artifacts. Bố cục:
+#   data/preprocess/v_<n>/            output của preprocess, nguồn để seed RDS
+#   models/<model>/v=<n>/             bản phát hành bất biến của model version n (geolife.publish)
+#   monitoring/, exports/             baseline drift, log dự đoán xuất ra
+# Mọi đường dẫn gắn với số version; vai trò của version (alias) chỉ nằm trên registry.
+# Không có rule xoá models/: version đã phát hành luôn còn để rollback.
 
 resource "aws_s3_bucket" "artifacts" {
   bucket = "${local.name}-${local.account_id}-artifacts"
@@ -44,7 +48,7 @@ resource "aws_s3_bucket_policy" "artifacts_tls_only" {
 resource "aws_s3_bucket_lifecycle_configuration" "artifacts" {
   bucket = aws_s3_bucket.artifacts.id
 
-  # bản cũ của object (bị ghi đè hoặc xoá) giữ 30 ngày
+  # Bản cũ của object (bị ghi đè hoặc xoá) giữ 30 ngày.
   rule {
     id     = "noncurrent-30d"
     status = "Enabled"
@@ -67,15 +71,14 @@ resource "aws_s3_bucket_lifecycle_configuration" "artifacts" {
 
 resource "aws_ecr_repository" "api" {
   name = "${local.name}-api"
-  # tag là git SHA: một tag chỉ trỏ vào một image
+  # Tag là git SHA; không ghi đè được tag đã có.
   image_tag_mutability = "IMMUTABLE"
-  force_delete         = true # make aws-nuke xoá được cả repo còn image
+  force_delete         = true # cho phép destroy repo khi còn image
   image_scanning_configuration { scan_on_push = true }
 }
 
-# Đếm theo lần build, không theo mục: mỗi build có đúng một tag (git SHA), nên chỉ đếm image có tag.
-# Nếu image là OCI index, các manifest con (image theo platform, attestation) hiện thành mục không tag; đếm "any"
-# sẽ tính cả chúng và xoá tag của build cũ sớm hơn dự định.
+# Giữ 5 build gần nhất. Mỗi build có đúng một tag (git SHA), nên rule đếm image có tag. Manifest không tag
+# (manifest con của một OCI index) không được tính là build; ECR không xoá chúng khi index còn tham chiếu.
 resource "aws_ecr_lifecycle_policy" "api" {
   repository = aws_ecr_repository.api.name
   policy = jsonencode({
@@ -87,7 +90,7 @@ resource "aws_ecr_lifecycle_policy" "api" {
         action       = { type = "expire" }
       },
       {
-        # manifest con mồ côi sau khi index của nó bị xoá; ECR không xoá manifest còn được index tham chiếu
+        # Manifest không tag còn lại sau khi index của nó hết hạn.
         rulePriority = 2
         description  = "don manifest khong tag sau 7 ngay"
         selection    = { tagStatus = "untagged", countType = "sinceImagePushed", countUnit = "days", countNumber = 7 }

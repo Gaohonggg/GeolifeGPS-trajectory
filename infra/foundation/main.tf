@@ -1,6 +1,6 @@
-# Nền luôn bật, gần như 0 đồng: mạng, bucket artifacts, ECR, IAM role của task, ECS cluster, log group, budget.
-# Không có resource nào tính tiền theo giờ (không NAT, không ALB, không RDS).
-# Bucket của backend truyền lúc init: make tf-init S=foundation
+# Stack foundation: tài nguyên dùng chung, luôn bật — mạng, bucket artifacts, ECR, IAM role của task, ECS cluster,
+# log group, budget. Không có tài nguyên tính phí theo giờ.
+# Tên bucket của backend truyền lúc init: make tf-init S=foundation
 
 terraform {
   required_version = ">= 1.10"

@@ -1,5 +1,5 @@
-# Bucket chứa Terraform state của các stack còn lại. Tạo một lần.
-# Stack này giữ state ở local (nó tạo ra chính chỗ chứa state). Mất file state thì nhập lại:
+# Stack bootstrap: bucket chứa Terraform state của các stack khác. Tạo một lần.
+# State của stack này nằm ở local vì bucket chưa tồn tại lúc tạo. Nếu mất file state, nhập lại bằng:
 #   terraform -chdir=infra/bootstrap import aws_s3_bucket.state geolife-<account_id>-tfstate
 
 terraform {
@@ -25,7 +25,7 @@ resource "aws_s3_bucket" "state" {
   bucket = "geolife-${data.aws_caller_identity.me.account_id}-tfstate"
 }
 
-# state hỏng hoặc bị ghi nhầm thì khôi phục từ bản trước
+# Versioning cho phép khôi phục state về bản trước khi state hỏng hoặc bị ghi nhầm.
 resource "aws_s3_bucket_versioning" "state" {
   bucket = aws_s3_bucket.state.id
   versioning_configuration { status = "Enabled" }

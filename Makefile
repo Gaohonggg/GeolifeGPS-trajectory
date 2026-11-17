@@ -34,13 +34,13 @@ down:           ## dừng stack, giữ dữ liệu
 clean:          ## dừng và xoá dữ liệu Postgres
 	$(COMPOSE) down -v
 
-# ---- AWS  ----
+# ---- AWS ----
 # aws CLI, Terraform và boto3 đều đọc hai biến này; đổi bằng `make <lệnh> AWS_PROFILE=...`
 export AWS_PROFILE ?= geolife-dev
 export AWS_REGION  ?= ap-southeast-1
 
-# `=` thay vì `:=`: chỉ gọi aws / git khi lệnh cần tới
-# make 3.81 của macOS không truyền biến export vào $(shell), nên truyền profile tường minh
+# Gán bằng `=` để chỉ gọi aws / git khi lệnh cần tới.
+# GNU make 3.81 (bản đi kèm macOS) không truyền biến export vào $(shell), nên profile được truyền tường minh.
 AWS_ACCOUNT = $(shell AWS_PROFILE=$(AWS_PROFILE) aws sts get-caller-identity --query Account --output text)
 ECR_HOST    = $(AWS_ACCOUNT).dkr.ecr.$(AWS_REGION).amazonaws.com
 ECR_REPO    = $(ECR_HOST)/geolife-api
@@ -52,7 +52,7 @@ IMAGE       = geolife-api:$(GIT_SHA)
 aws-whoami:     ## tài khoản và user đang dùng
 	aws sts get-caller-identity
 
-# --provenance=false: không đính attestation, nên image là một manifest đơn thay vì OCI index có manifest con
+# Không đính kèm provenance / SBOM: image là một manifest đơn, mỗi lần push là một image trong ECR.
 aws-build:      ## build image linux/arm64 (Fargate Graviton), tag theo git SHA
 	docker buildx build --platform linux/arm64 --provenance=false --sbom=false -f docker/api.Dockerfile -t $(IMAGE) --load .
 
@@ -66,8 +66,8 @@ aws-publish-model:  ## sao một version từ registry sang S3 kèm manifest: ma
 	@test -n "$(V)" || { echo "thiếu V, vd. make aws-publish-model V=4"; exit 1; }
 	uv run python -m geolife.publish --version $(V)
 
-# ---- Terraform: make tf-plan S=foundation ----
-# bootstrap giữ state ở local; các stack khác dùng bucket do bootstrap tạo
+# ---- Terraform: make tf-<lệnh> S=<stack>, vd. make tf-plan S=foundation ----
+# bootstrap giữ state ở local; các stack khác lưu state trong bucket do bootstrap tạo.
 TF          = terraform -chdir=infra/$(S)
 STATE_BUCKET = geolife-$(AWS_ACCOUNT)-tfstate
 
