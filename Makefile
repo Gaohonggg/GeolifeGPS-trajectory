@@ -40,7 +40,8 @@ export AWS_PROFILE ?= geolife-dev
 export AWS_REGION  ?= ap-southeast-1
 
 # `=` thay vì `:=`: chỉ gọi aws / git khi lệnh cần tới
-AWS_ACCOUNT = $(shell aws sts get-caller-identity --query Account --output text)
+# make 3.81 của macOS không truyền biến export vào $(shell), nên truyền profile tường minh
+AWS_ACCOUNT = $(shell AWS_PROFILE=$(AWS_PROFILE) aws sts get-caller-identity --query Account --output text)
 ECR_HOST    = $(AWS_ACCOUNT).dkr.ecr.$(AWS_REGION).amazonaws.com
 ECR_REPO    = $(ECR_HOST)/geolife-api
 GIT_SHA     = $(shell git rev-parse --short=12 HEAD)
@@ -63,3 +64,29 @@ aws-push: aws-build  ## push image lên ECR; từ chối khi còn thay đổi ch
 aws-publish-model:  ## sao một version từ registry sang S3 kèm manifest: make aws-publish-model V=4
 	@test -n "$(V)" || { echo "thiếu V, vd. make aws-publish-model V=4"; exit 1; }
 	uv run python -m geolife.publish --version $(V)
+
+# ---- Terraform: make tf-plan S=foundation ----
+# bootstrap giữ state ở local; các stack khác dùng bucket do bootstrap tạo
+TF          = terraform -chdir=infra/$(S)
+STATE_BUCKET = geolife-$(AWS_ACCOUNT)-tfstate
+
+.PHONY: tf-check tf-init tf-plan tf-apply tf-output
+
+tf-check:
+	@test -n "$(S)" -a -d "infra/$(S)" || { echo "thiếu S hoặc infra/$(S) không có, vd. make tf-plan S=foundation"; exit 1; }
+
+tf-init: tf-check   ## terraform init cho một stack
+ifeq ($(S),bootstrap)
+	$(TF) init
+else
+	$(TF) init -backend-config="bucket=$(STATE_BUCKET)" -backend-config="region=$(AWS_REGION)"
+endif
+
+tf-plan: tf-check   ## xem thay đổi
+	$(TF) plan
+
+tf-apply: tf-check  ## áp dụng (Terraform hỏi lại trước khi tạo / sửa)
+	$(TF) apply
+
+tf-output: tf-check
+	$(TF) output

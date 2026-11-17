@@ -13,3 +13,10 @@ slides/*
 # biến môi trường local (mật khẩu, token), không commit
 .env
 geolife-admin_credentials.csv
+
+# Terraform: state và provider tải về; tfvars chứa email; giữ .terraform.lock.hcl
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+infra/**/terraform.tfvars
