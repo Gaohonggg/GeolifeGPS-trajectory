@@ -73,14 +73,26 @@ resource "aws_ecr_repository" "api" {
   image_scanning_configuration { scan_on_push = true }
 }
 
+# Đếm theo lần build, không theo mục: mỗi build có đúng một tag (git SHA), nên chỉ đếm image có tag.
+# Nếu image là OCI index, các manifest con (image theo platform, attestation) hiện thành mục không tag; đếm "any"
+# sẽ tính cả chúng và xoá tag của build cũ sớm hơn dự định.
 resource "aws_ecr_lifecycle_policy" "api" {
   repository = aws_ecr_repository.api.name
   policy = jsonencode({
-    rules = [{
-      rulePriority = 1
-      description  = "giu 5 image gan nhat"
-      selection    = { tagStatus = "any", countType = "imageCountMoreThan", countNumber = 5 }
-      action       = { type = "expire" }
-    }]
+    rules = [
+      {
+        rulePriority = 1
+        description  = "giu 5 build gan nhat"
+        selection    = { tagStatus = "tagged", tagPatternList = ["*"], countType = "imageCountMoreThan", countNumber = 5 }
+        action       = { type = "expire" }
+      },
+      {
+        # manifest con mồ côi sau khi index của nó bị xoá; ECR không xoá manifest còn được index tham chiếu
+        rulePriority = 2
+        description  = "don manifest khong tag sau 7 ngay"
+        selection    = { tagStatus = "untagged", countType = "sinceImagePushed", countUnit = "days", countNumber = 7 }
+        action       = { type = "expire" }
+      },
+    ]
   })
 }

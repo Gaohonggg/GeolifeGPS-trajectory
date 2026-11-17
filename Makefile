@@ -52,8 +52,9 @@ IMAGE       = geolife-api:$(GIT_SHA)
 aws-whoami:     ## tài khoản và user đang dùng
 	aws sts get-caller-identity
 
+# --provenance=false: không đính attestation, nên image là một manifest đơn thay vì OCI index có manifest con
 aws-build:      ## build image linux/arm64 (Fargate Graviton), tag theo git SHA
-	docker buildx build --platform linux/arm64 -f docker/api.Dockerfile -t $(IMAGE) --load .
+	docker buildx build --platform linux/arm64 --provenance=false --sbom=false -f docker/api.Dockerfile -t $(IMAGE) --load .
 
 aws-push: aws-build  ## push image lên ECR; từ chối khi còn thay đổi chưa commit (tag phải đúng với code)
 	@test -z "$$(git status --porcelain)" || { echo "còn thay đổi chưa commit: tag $(GIT_SHA) sẽ không đúng với image"; exit 1; }
