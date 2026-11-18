@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import io
+import sys
 import time
 
 import psycopg
@@ -29,6 +30,14 @@ def open_dir(data_dir: str) -> tuple[pafs.FileSystem, str]:
         return pafs.LocalFileSystem(), str(pafs.LocalFileSystem().normalize_path(data_dir))
     filesystem, path = pafs.FileSystem.from_uri(data_dir)
     return filesystem, path.rstrip("/")
+
+
+def progress(prev: int, n: int, elapsed: float, every: int = 2_000_000) -> None:
+    """Terminal: ghi đè một dòng. Log (CloudWatch, file): một dòng mỗi khi vượt qua bội số của `every` điểm."""
+    if sys.stdout.isatty():
+        print(f"\r{n:,} points ({elapsed:.0f}s)", end="", flush=True)
+    elif n // every > prev // every:
+        print(f"{n:,} points ({elapsed:.0f}s)", flush=True)
 
 
 def seed(url: str, data_dir: str, split: str = "all", replace: bool = False, batch_size: int = 500_000) -> int:
@@ -54,7 +63,8 @@ def seed(url: str, data_dir: str, split: str = "all", replace: bool = False, bat
         n, t0 = 0, time.perf_counter()
         with filesystem.open_input_file(f"{root}/points.parquet") as f, conn.cursor() as cur, cur.copy(
                 "COPY gps_points (user_id, ts_utc, ts_local, tz, lat, lon) FROM STDIN (FORMAT csv)") as copy:
-            for batch in pq.ParquetFile(f).iter_batches(batch_size=batch_size, columns=COLUMNS):
+            # pre_buffer=False: mặc định pyarrow đọc trước và giữ toàn bộ file nén (~600 MB) tới hết vòng lặp
+            for batch in pq.ParquetFile(f, pre_buffer=False).iter_batches(batch_size=batch_size, columns=COLUMNS):
                 t = pa.Table.from_batches([batch]).select(COLUMNS)   # đúng thứ tự cột của lệnh COPY
                 t = t.filter(pc.is_in(pc.cast(t["user"], pa.int32()), ids))
                 if t.num_rows == 0:
@@ -63,9 +73,10 @@ def seed(url: str, data_dir: str, split: str = "all", replace: bool = False, bat
                 buf = io.BytesIO()
                 csv.write_csv(t, buf, csv.WriteOptions(include_header=False))
                 copy.write(buf.getvalue())
-                n += t.num_rows
-                print(f"\r{n:,} points ({time.perf_counter() - t0:.0f}s)", end="", flush=True)
-        print()
+                prev, n = n, n + t.num_rows
+                progress(prev, n, time.perf_counter() - t0)
+        if sys.stdout.isatty():
+            print()
 
         conn.execute("""
             UPDATE users u SET n_points = s.n, first_ts = s.first_ts, last_ts = s.last_ts

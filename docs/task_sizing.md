@@ -1,4 +1,4 @@
-# Cỡ task của API: số đo RAM và thời gian
+# Cỡ task: số đo RAM và thời gian
 
 Tài liệu này đo API dưới giới hạn CPU / RAM giống một ECS task để chọn cỡ task. Đo ngày 2026-11-16, commit `3f3e739`.
 
@@ -92,12 +92,36 @@ Thời gian từ lúc container khởi động tới lúc `/v1/health` trả `ok
 | --- | --- | --- |
 | **API** (`api-blue`, `api-green`) | **0,5 / 2 GB** | 2 GB chứa được mọi request đơn lẻ (đỉnh 1 370 MB); 1 GB thì không. 0,5 vCPU cho request nặng nhất 7–8 giây; 0,25 vCPU đẩy lên 19–26 giây và khởi động lâu hơn khoảng 70% |
 | **Worker** | **1 / 2 GB** | Mỗi lúc xử lý một job nên 2 GB đủ; worker chuyên xử lý user nặng, 1 vCPU giảm một nửa thời gian mỗi job |
-| **Seed, migrate, drift** | 0,5 / 2 GB; 0,25 / 0,5 GB; 0,25 / 1 GB | Chưa đo. Seed đọc parquet theo lô 500 nghìn dòng; migrate và drift không nạp model |
+| **Seed, migrate** (task `geolife-ops`) | 1 / 2 GB | Seed đo ở B4: đỉnh 783 MB khi nạp toàn bộ; migrate không nạp dữ liệu. Dùng chung một task definition |
+| **Drift** | 0,25 / 1 GB | Chưa đo; không nạp model |
 
 Hai hệ quả cho thiết kế:
 
 - **API phải giới hạn tổng số điểm đang xử lý đồng thời.** Với 2 GB, ngân sách là (2 048 − 320 − 230 dự trữ) / 0,5 KB ≈ 3 triệu điểm. Số điểm của mỗi user đã có sẵn trong bảng `users` (`n_points`), nên API biết trước khi đọc điểm. Request vượt ngân sách thì chờ; không có giới hạn này, hai request nặng trùng nhau là đủ làm task bị giết.
 - **`health_check_grace_period_seconds` đặt 120 giây**, gấp khoảng 6 lần thời gian khởi động đo được, để bù cho CPU của Fargate chậm hơn máy đo.
+
+## B4. Seed: RAM và thời gian nạp vào RDS
+
+Đo ngày 2026-11-18. Seed đọc `points.parquet` (605 MB nén, 23 row group khoảng 1 triệu dòng) và ghi vào Postgres bằng `COPY` theo lô 500 nghìn dòng.
+
+**RAM đỉnh** (container local, `--memory 2g`, nạp toàn bộ 182 user; RSS đỉnh của process và bộ nhớ Arrow đang cấp phát):
+
+| `ParquetFile` | RSS đỉnh | Bộ nhớ Arrow trong vòng lặp | Trên Fargate 1 vCPU / 2 GB |
+| --- | --- | --- | --- |
+| Mặc định (`pre_buffer=True`) | 1 361 MB | Tăng đều tới ~630 MB | Bị giết (exit 137) khi đọc từ S3 |
+| `pre_buffer=False` | 783 MB | Giữ quanh 80 MB | — |
+
+Với `pre_buffer=True`, pyarrow đọc trước các vùng của file và giữ chúng tới hết vòng lặp, nên bộ nhớ tăng theo kích thước file nén thay vì theo kích thước một lô. Đọc từ S3 thêm bộ đệm mạng nên vượt 2 GB. Seed đặt `pre_buffer=False`.
+
+**Thời gian trên AWS** (task Fargate ARM 1 vCPU đọc S3, RDS `db.t4g.micro` gp3 20 GB; tính từ lúc container chạy tới lúc dừng):
+
+| Lệnh | Số điểm | Thời gian |
+| --- | --- | --- |
+| `migrate` | — | ~11 giây |
+| `seed --split holdout` | 5 639 032 | ~111 giây |
+| `seed --replace` (toàn bộ) | 24 091 430 | ~531 giây |
+
+Lần nạp toàn bộ chạy bằng image còn `pre_buffer=True`, với RAM nâng lên 4 GB cho riêng lần đó; chưa đo lại với `pre_buffer=False`. Ở lần holdout, vòng đọc và `COPY` xong sau 13 giây, phần còn lại (cập nhật thống kê bảng `users`, commit, `ANALYZE`) chiếm phần lớn thời gian. Thêm khoảng 30 giây để Fargate cấp phát và kéo image trước khi container chạy.
 
 ## Giới hạn của phép đo
 

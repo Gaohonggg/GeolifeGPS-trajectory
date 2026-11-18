@@ -66,6 +66,35 @@ aws-publish-model:  ## sao một version từ registry sang S3 kèm manifest: ma
 	@test -n "$(V)" || { echo "thiếu V, vd. make aws-publish-model V=4"; exit 1; }
 	uv run python -m geolife.publish --version $(V)
 
+# ---- DB trên AWS (stack data). Lệnh chạy trong VPC bằng task geolife-ops: scripts/ecs_run.py ----
+ARTIFACTS_BUCKET = geolife-$(AWS_ACCOUNT)-artifacts
+# MEMORY=<MB> đổi RAM của task cho riêng lần chạy đó
+ECS_RUN          = uv run python scripts/ecs_run.py $(if $(MEMORY),--memory $(MEMORY))
+DB_ID            = geolife
+
+.PHONY: aws-migrate aws-seed aws-db-count aws-db-stop aws-db-start
+
+aws-migrate:    ## tạo / cập nhật bảng trên RDS
+	$(ECS_RUN) python -m geolife_api.migrate
+
+aws-seed:       ## nạp dữ liệu từ S3 vào RDS (ARGS="--split holdout" hoặc ARGS=--replace)
+	$(ECS_RUN) python -m geolife_api.seed --data-dir s3://$(ARTIFACTS_BUCKET)/$(DATA_DIR) $(ARGS)
+
+aws-db-count:   ## số user và số điểm trên RDS
+	$(ECS_RUN) python -c "import psycopg; from geolife_api.config import DbSettings; \
+		c = psycopg.connect(DbSettings().db_conninfo); \
+		print(c.execute('SELECT (SELECT count(*) FROM users), (SELECT count(*) FROM gps_points)').fetchone())"
+
+aws-db-stop:    ## stop RDS sau mỗi phiên (chỉ còn phí ổ đĩa; AWS tự bật lại sau 7 ngày)
+	aws rds stop-db-instance --db-instance-identifier $(DB_ID) --query DBInstance.DBInstanceStatus --output text
+	@# aws rds wait không có waiter cho trạng thái stopped
+	@until [ "$$(aws rds describe-db-instances --db-instance-identifier $(DB_ID) \
+		--query 'DBInstances[0].DBInstanceStatus' --output text)" = stopped ]; do sleep 20; done; echo stopped
+
+aws-db-start:
+	aws rds start-db-instance --db-instance-identifier $(DB_ID) --query DBInstance.DBInstanceStatus --output text
+	aws rds wait db-instance-available --db-instance-identifier $(DB_ID)
+
 # ---- Terraform: make tf-<lệnh> S=<stack>, vd. make tf-plan S=foundation ----
 # bootstrap giữ state ở local; các stack khác lưu state trong bucket do bootstrap tạo.
 TF          = terraform -chdir=infra/$(S)

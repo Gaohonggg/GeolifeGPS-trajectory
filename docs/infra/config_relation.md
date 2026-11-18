@@ -1,6 +1,6 @@
 # Cấu hình và quan hệ hạ tầng AWS
 
-Nguồn: [`infra/bootstrap/`](../../infra/bootstrap/), [`infra/foundation/`](../../infra/foundation/) và [`Makefile`](../../Makefile). Các giá trị dưới đây mô tả code đang khai báo, không xác nhận đã triển khai trên AWS.
+Nguồn: [`infra/bootstrap/`](../../infra/bootstrap/), [`infra/foundation/`](../../infra/foundation/) và [`Makefile`](../../Makefile). Các giá trị dưới đây mô tả code đang khai báo. Sơ đồ tổng quan, stack `data` và các luồng chạy: [`README.md`](README.md).
 
 ## 1. Bootstrap, foundation và nơi lưu state
 
@@ -104,7 +104,7 @@ Người dùng
                                      Đường đi thực tế phụ thuộc route/IP
 ```
 
-ALB, ECS task và RDS trong sơ đồ là tài nguyên dự kiến. Foundation mới tạo security group cho chúng, chưa tạo ALB, RDS, task definition hay service.
+Foundation chỉ tạo security group. RDS và task definition `geolife-ops` nằm ở stack `data`; ALB và ECS service nằm ở stack `serving`.
 
 | Rule | Nhóm áp dụng | Hướng | Nguồn / đích | Cho phép |
 |---|---|---|---|---|
@@ -193,7 +193,7 @@ Versioning không đồng nghĩa bất biến. Bản hiện hành dưới `model
 | Repository | `geolife-api` |
 | Image tags | `IMMUTABLE`: không ghi đè tag đã tồn tại |
 | Scan on push | `true` |
-| Lifecycle | `tagStatus=any`, giữ năm image mới nhất theo thời gian push |
+| Lifecycle | Giữ 5 image có tag mới nhất; manifest không tag bị xoá sau 7 ngày |
 | `force_delete` | `true`: cho phép xóa repository còn image |
 
 Immutable tag không ngăn lifecycle xóa image cũ.
@@ -227,8 +227,8 @@ Foundation
     ├─ Execution/task role ARNs ───────► Gắn quyền cho ECS task
     └─ Cluster/log group ──────────────► Chọn nơi chạy và nơi gửi log
                                             │
-                                  Stack data/serving dự kiến
-                                  (chưa có trong infra/)
+                                  Stack data (infra/data)
+                                  và serving (bước 2.2)
 ```
 
 | Nhóm | Outputs |

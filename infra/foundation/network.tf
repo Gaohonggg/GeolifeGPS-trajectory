@@ -76,7 +76,7 @@ resource "aws_vpc_security_group_egress_rule" "alb_to_task" {
 }
 
 resource "aws_security_group" "task" {
-  name        = "${local.name}-task"
+  name = "${local.name}-task"
   # Đổi description buộc AWS tạo lại security group, nên giữ nguyên chuỗi đã tạo.
   description = "ECS task: vao tu ALB, ra internet (ECR, S3, Databricks khong can)"
   vpc_id      = aws_vpc.main.id
