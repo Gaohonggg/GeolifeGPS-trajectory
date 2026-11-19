@@ -123,9 +123,90 @@ Với `pre_buffer=True`, pyarrow đọc trước các vùng của file và giữ
 
 Lần nạp toàn bộ chạy bằng image còn `pre_buffer=True`, với RAM nâng lên 4 GB cho riêng lần đó; chưa đo lại với `pre_buffer=False`. Ở lần holdout, vòng đọc và `COPY` xong sau 13 giây, phần còn lại (cập nhật thống kê bảng `users`, commit, `ANALYZE`) chiếm phần lớn thời gian. Thêm khoảng 30 giây để Fargate cấp phát và kéo image trước khi container chạy.
 
+## B5. Thời gian trên AWS
+
+Đo ngày 2026-11-18, image `2cba159e21cb`, service `api-blue` (`stay_point` v1, Fargate ARM 0,5 vCPU / 2 GB) sau ALB, RDS `db.t4g.micro` (2 vCPU, 1 GB RAM) gp3 20 GB (3 000 IOPS, 125 MB/s). Client gọi tuần tự từ máy đo qua internet, mỗi user ba lần.
+
+**Thời gian một request** (giây, ba lần gọi):
+
+| User | Số điểm | Trên AWS | Ở local, 0,5 vCPU (B2) |
+| --- | --- | --- | --- |
+| 83 (trung vị) | 34 960 | 0,50 / 0,46 / 0,40 | 0,13 |
+| 14 (phân vị 90) | 388 211 | 16,3 / 15,9 / 15,6 | 0,92 |
+| 153 (lớn nhất) | 2 156 929 | 26,6 / 27,3 / 26,8 | 6,7 |
+| `/v1/health` | — | 0,16 / 0,20 / 0,17 | — |
+
+User 14 chậm gấp 17 lần ở local dù số điểm chỉ bằng 18% user 153, nên phần chậm thêm không nằm ở model.
+
+**Thời gian đọc điểm từ RDS** (`Database.fetch_points`, chạy trong một task ở cùng VPC):
+
+| User | Số trang chứa điểm của user | Thời gian đọc | Kế hoạch truy vấn |
+| --- | --- | --- | --- |
+| 83 | 361 | 0,15 giây | Index scan trên khoá chính |
+| 14 | 4 003 | 15,2 / 14,9 giây | Parallel seq scan cả bảng rồi sort: đọc 230 921 trang (1,8 GB) từ đĩa |
+| 153 | 22 320 | 22,5 giây | Parallel seq scan cả bảng rồi sort |
+
+⇒ Trên AWS, thời gian request bị chi phối bởi việc đọc DB: user 153 mất 26,8 giây, trong đó 22,5 giây là đọc điểm. Phần dưới giải thích vì sao Postgres chọn đọc cả bảng.
+
+### Postgres đọc điểm của một user như thế nào
+
+- **Trang.** Postgres lưu bảng thành các trang 8 KB và luôn đọc theo trang. `gps_points` có 248 704 trang (1,9 GB), index khoá chính `(user_id, ts_utc)` thêm 725 MB.
+- **Bộ nhớ đệm.** Trang đã đọc nằm lại trong `shared_buffers` (180 MB trên `db.t4g.micro`) và page cache của hệ điều hành. Trang không có ở đó phải đọc từ ổ gp3, tối đa 125 MB/s. Bảng lớn hơn cả RAM của instance (1 GB), nên mỗi lần quét cả bảng đều đọc lại từ đĩa: 1,8 GB ở 125 MB/s mất khoảng 15 giây. Ở local (VM 12,5 GB RAM) cả bảng nằm trong bộ nhớ đệm, nên B2 không thấy chênh lệch này.
+- **Hai cách lấy điểm của một user:**
+  - *Seq scan*: đọc mọi trang của bảng, lọc theo `user_id`, rồi sort theo `ts_utc`. Chi phí tỉ lệ với kích thước bảng, không phụ thuộc user. Parallel seq scan chia việc cho 2 worker, nhưng các worker dùng chung một ổ đĩa. Sort cần nhiều hơn `work_mem` (4 MB) nên ghi file tạm ra đĩa (25 MB với user 14, 273 MB với user 153).
+  - *Index scan* trên khoá chính: tìm `user_id` trong B-tree rồi đọc đúng các trang chứa điểm của user, theo sẵn thứ tự `ts_utc` nên không cần sort. Seed nạp điểm theo thứ tự user, nên điểm của một user nằm liền nhau: user 14 gọn trong 4 003 trang, user 153 trong 22 320 trang (`correlation` của `user_id` trong `pg_stats` là 1,0).
+- **Planner chọn kế hoạch theo chi phí ước lượng**, không đo thời gian thật. Chi phí tính bằng đơn vị quy ước: `seq_page_cost = 1` cho mỗi trang đọc tuần tự, `random_page_cost = 4` cho mỗi trang đọc ngẫu nhiên, cộng chi phí CPU cho mỗi dòng. Kế hoạch có tổng chi phí thấp nhất được chạy.
+
+### Vì sao planner ước lượng sai
+
+Chi phí đọc heap của index scan được nội suy giữa hai trường hợp, với trọng số là bình phương độ tương quan giữa thứ tự index và thứ tự vật lý ([`cost_index`](https://github.com/postgres/postgres/blob/REL_17_STABLE/src/backend/optimizer/path/costsize.c)):
+
+| Trường hợp | Giả định | Số trang ước lượng (user 153) |
+| --- | --- | --- |
+| Xấu nhất | Mỗi dòng nằm ở một trang ngẫu nhiên; công thức Mackert–Lohman tính cả việc trang bị đẩy khỏi cache, với cache bằng `effective_cache_size` (360 MB) | 1 810 983 trang × `random_page_cost` |
+| Tốt nhất | Các dòng nằm liền nhau | 21 588 trang × `seq_page_cost` |
+
+`correlation` của `user_id` là 1,0, đáng lẽ chi phí nằm hẳn ở trường hợp tốt nhất. Nhưng khi index có nhiều cột, Postgres nhân độ tương quan của cột đầu với 0,75 ([`btcostestimate`](https://github.com/postgres/postgres/blob/REL_17_STABLE/src/backend/utils/adt/selfuncs.c)). Trọng số còn 0,75² ≈ 0,56, nên 44% chi phí của trường hợp xấu nhất vẫn được cộng vào. Tính lại theo công thức này ra đúng chi phí planner báo (lệch dưới 0,01%). Nếu dùng tương quan 1,0, index scan của user 153 chỉ tốn khoảng 90 nghìn đơn vị.
+
+**Chi phí planner ước lượng** (`EXPLAIN`, không thực thi) so với thời gian đọc thật:
+
+| User | Seq scan: chi phí ước lượng | Index scan: chi phí ước lượng | Seq scan: thời gian thật | Index scan: thời gian thật |
+| --- | --- | --- | --- | --- |
+| 83 | — | 75 323 (được chọn) | — | 0,15 giây |
+| 14 | 431 078 (được chọn) | 592 611 | 15,2 giây | 0,40 giây |
+| 153 | 724 053 (được chọn) | 3 250 112 | 22,5 giây | 1,8 giây |
+
+Planner tính index scan của user 153 đắt gấp 4,5 lần seq scan, trong khi thực tế nó nhanh hơn 12 lần. Hai giả định cộng dồn: `random_page_cost = 4` là giá trị cho ổ quay, và hệ số 0,75 làm phần lớn số trang bị tính như đọc ngẫu nhiên.
+
+### Thử cấu hình planner
+
+Cùng truy vấn, đặt cấu hình trong session (`EXPLAIN ANALYZE`):
+
+| Cấu hình | User 14 | User 153 |
+| --- | --- | --- |
+| Mặc định của RDS (`random_page_cost = 4`, 2 worker song song) | 15,2 giây, seq scan | 18,7–22,5 giây, seq scan |
+| `random_page_cost = 1.1` | 1,3 giây, index scan | 18,7 giây, vẫn seq scan (ước lượng: seq 699 374, index 929 117) |
+| `random_page_cost = 1.1`, `max_parallel_workers_per_gather = 0` | 0,26 giây, index scan | 8,0 giây, seq scan + sort |
+| Chỉ tắt seq scan (`enable_seqscan = off`) | Bitmap heap scan + sort (chỉ `EXPLAIN`) | Bitmap heap scan + sort (chỉ `EXPLAIN`) |
+| Tắt seq scan và bitmap scan | 0,40 giây, index scan | 1,8 giây, index scan |
+
+Bitmap heap scan đọc trang theo thứ tự vật lý nên không giữ thứ tự `ts_utc`; planner phải sort thêm. Muốn có index scan thì phải tắt cả hai.
+
+RDS báo `CPUCreditBalance = 0` trong suốt phép đo (T4g của RDS chạy ở chế độ unlimited: không bị hãm CPU, phần vượt baseline tính phí riêng) và `FreeableMemory` khoảng 100 MB.
+
+### Cách cải thiện
+
+| Cách | Tác dụng | Chọn |
+| --- | --- | --- |
+| `random_page_cost = 1.1` trong parameter group của RDS | Đúng với ổ SSD (tài liệu Postgres gợi ý giá trị thấp như 1.1 cho SSD), áp cho mọi truy vấn. Không đủ với user lớn nhất | Có |
+| `SET LOCAL enable_seqscan = off`, `enable_bitmapscan = off` trong `fetch_points` | Index scan cho mọi user: nhanh nhất ở cả ba user đo. `SET LOCAL` chỉ có hiệu lực tới hết transaction, không ảnh hưởng truy vấn khác dùng chung connection. Truy vấn luôn lọc theo cột đầu của khoá chính và cần thứ tự của khoá chính, nên index scan luôn là cách đọc đúng | Có |
+| Instance có RAM chứa được bảng và index (2,6 GB; từ `db.t4g.medium`, 4 GB) | Seq scan đọc từ bộ nhớ, nhưng vẫn quét cả bảng cho mỗi request. Giá theo giờ gấp 4 lần trở lên, và bảng tăng theo dữ liệu | Không |
+| Index riêng trên `user_id` (một cột, tương quan 1,0) | Planner chọn đúng index, nhưng tốn thêm vài trăm MB và vẫn phải sort theo `ts_utc` | Không |
+| Partition `gps_points` theo user | Seq scan chỉ quét partition của user, nhưng phải đổi schema và seed | Không |
+
 ## Giới hạn của phép đo
 
-- **Thời gian là số của máy đo, không phải của Fargate.** CPU Apple Silicon nhanh hơn Graviton, và Postgres ở đây chạy cùng máy thay vì là RDS `db.t4g.micro` qua mạng. Thời gian trên AWS sẽ dài hơn; cần đo lại khi service đã chạy trên Fargate.
+- **Thời gian ở B2 là số của máy đo, không phải của Fargate.** CPU Apple Silicon nhanh hơn Graviton, và Postgres ở đó chạy cùng máy, cả bảng nằm trong bộ nhớ đệm. Số trên AWS ở B5.
 - **RAM chuyển sang Fargate được**: cùng image arm64, cùng dữ liệu.
 - **Mỗi ô là một hoặc hai lần đo**, không phải phân bố. Các lần lặp lại lệch nhau dưới 5% về RAM và khoảng 10% về thời gian.
 - **Chỉ đo request dùng toàn bộ điểm của user.** Request có `start` / `end` đọc ít điểm hơn, nên đây là trường hợp nặng nhất của mỗi user.
