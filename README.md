@@ -23,10 +23,10 @@ Từ quỹ đạo GPS của bộ [GeoLife Trajectories 1.3](https://www.microsof
 | `src/geolife_api/` | API theo contract `docs/openapi.yaml`: đọc điểm của user từ Postgres, chạy model version nạp từ MLflow registry trên Databricks (`main` là phần HTTP, `service` là logic, `migrate` / `seed` tạo bảng và nạp dữ liệu) |
 | `db/migrations/` | Schema Postgres, mỗi file một lần thay đổi, chạy theo thứ tự tên |
 | `docker/` | `api.Dockerfile`, `compose.yaml` (Postgres, API) |
-| `scripts/` | `measure_sizing.py`: đo RAM và thời gian của API dưới giới hạn CPU / RAM của một task; `ecs_run.py`: chạy một lệnh của image thành ECS task một lần trên AWS (migrate, seed), in log |
-| `infra/` | Terraform, mỗi thư mục một stack: `bootstrap` (bucket state), `foundation` (mạng, S3, ECR, IAM, ECS cluster, budget), `data` (RDS, task `geolife-ops`). Sơ đồ: [`docs/infra/`](docs/infra/README.md) |
+| `scripts/` | `measure_sizing.py`: đo RAM và thời gian của API dưới giới hạn CPU / RAM của một task; `ecs_run.py`: chạy một lệnh của image thành ECS task một lần trên AWS (migrate, seed), in log; `promote.py`: đổi alias `@champion` / `@challenger` trên registry thành model version của hai slot API (`infra/serving/models.auto.tfvars.json`) |
+| `infra/` | Terraform, mỗi thư mục một stack: `bootstrap` (bucket state), `foundation` (mạng, S3, ECR, IAM, ECS cluster, budget), `data` (RDS, task `geolife-ops`), `serving` (ALB, hai slot API blue / green). Tài liệu: [`docs/infra/`](docs/infra/overview.md) |
 | `.env.example` | Biến môi trường ở local (stack docker, token Databricks); `make env` copy thành `.env` (không commit) |
-| `tests/` | `test_parity` (chạy từng user khớp kết quả chạy hàng loạt), `test_mlflow_model`, `api/` (HTTP với DB / model giả), `integration/` (với stack đang chạy) |
+| `tests/` | `test_parity` (chạy từng user khớp kết quả chạy hàng loạt), `test_mlflow_model`, `test_publish`, `test_promote` (xếp version vào slot), `api/` (HTTP với DB / model giả), `integration/` (với API đang chạy, ở local hoặc trên AWS) |
 | `data/` | Không commit. `Geolife_Trajectories/` là dữ liệu gốc; `preprocess/v_<n>/` là output của từng version preprocess |
 
 **Quản lý version:** preprocess và model đều có version riêng, mỗi version là một thư mục có `config.yaml`. Khi đã có kết quả dựa trên một version thì không
@@ -44,7 +44,7 @@ sửa version đó nữa: đổi tham số thì tạo version mới. Config củ
 8. [`docs/models/dbscan_v1.md`](docs/models/dbscan_v1.md): model dbscan v1 (DBSCAN trên ô lưới, trọng số thời gian, mỗi cụm là một place; toạ độ ô = tâm hình học), cách chọn từng tham số, kết quả holdout.
 9. [`docs/models/dbscan_v2.md`](docs/models/dbscan_v2.md): model dbscan v2 (toạ độ ô = trung bình có trọng số thời gian của các điểm trong ô), cùng quy trình chọn tham số với dbscan v1.
 10. [`docs/task_sizing.md`](docs/task_sizing.md): RAM và thời gian của API theo số điểm của user và theo cỡ task, dùng để chọn cỡ task khi deploy.
-11. [`docs/infra/README.md`](docs/infra/README.md): hạ tầng AWS qua sơ đồ (code chạy ở đâu, các stack Terraform, mạng, luồng phát hành và nạp dữ liệu); chi tiết cấu hình ở [`docs/infra/config_relation.md`](docs/infra/config_relation.md).
+11. [`docs/infra/overview.md`](docs/infra/overview.md): hạ tầng AWS qua sơ đồ (code chạy ở đâu, các stack Terraform, mạng, luồng phát hành, nạp dữ liệu và phục vụ, blue / green và canary); giá trị cấu hình của từng stack ở [`docs/infra/config_relation.md`](docs/infra/config_relation.md).
 
 ## Chạy lại
 

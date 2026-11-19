@@ -1,13 +1,23 @@
 # Cấu hình và quan hệ hạ tầng AWS
 
-Nguồn: [`infra/bootstrap/`](../../infra/bootstrap/), [`infra/foundation/`](../../infra/foundation/) và [`Makefile`](../../Makefile). Các giá trị dưới đây mô tả code đang khai báo. Sơ đồ tổng quan, stack `data` và các luồng chạy: [`README.md`](README.md).
+Nguồn: [`infra/`](../../infra/) (bốn stack `bootstrap`, `foundation`, `data`, `serving`) và [`Makefile`](../../Makefile). Các giá trị dưới đây mô tả code đang khai báo. Sơ đồ tổng quan và các luồng chạy: [`overview.md`](overview.md).
 
-## 1. Bootstrap, foundation và nơi lưu state
+| Mục | Stack |
+|---|---|
+| 1–2 | Chung: state, provider, biến |
+| 3–8 | `foundation`: mạng, security group, IAM, lưu trữ, compute, outputs |
+| 9 | `data`: RDS, task `geolife-ops` |
+| 10 | `serving`: ALB, hai slot API |
+| 11 | Makefile: các lệnh AWS |
+
+## 1. Các stack và nơi lưu state
 
 | Stack | Tạo gì? | State lưu ở đâu? |
 |---|---|---|
 | `bootstrap` | Bucket S3 `geolife-<account_id>-tfstate` | Local: thông thường `infra/bootstrap/terraform.tfstate` |
 | `foundation` | Mạng, S3 artifacts, ECR, IAM, ECS cluster, log group, budget | Trong bucket trên, tại `foundation/terraform.tfstate` |
+| `data` | RDS, task definition `geolife-ops` | `data/terraform.tfstate` |
+| `serving` | ALB, target group, task definition và ECS service của từng slot | `serving/terraform.tfstate` |
 
 ```text
 Máy chạy Terraform                              AWS
@@ -15,8 +25,9 @@ Máy chạy Terraform                              AWS
 bootstrap/main.tf ─────── tạo ────────────────► Bucket S3 chứa state
 bootstrap/terraform.tfstate                      geolife-<account_id>-tfstate
   │                                               │
-  └─ Ghi nhận bucket và cấu hình                  └─ foundation/terraform.tfstate
-     do bootstrap quản lý                            Ghi nhận tài nguyên foundation
+  └─ Ghi nhận bucket và cấu hình                  ├─ foundation/terraform.tfstate
+     do bootstrap quản lý                         ├─ data/terraform.tfstate
+                                                  └─ serving/terraform.tfstate
 ```
 
 Bucket được tạo thật trên AWS. “Local” chỉ vị trí state của bootstrap; state là bản ghi liên kết resource trong code với tài nguyên AWS, không phải bản sao nội dung bucket.
@@ -25,17 +36,17 @@ Bucket được tạo thật trên AWS. “Local” chỉ vị trí state của 
 |---|---|
 | Terraform | `>= 1.10` |
 | AWS provider | `hashicorp/aws`, `~> 6.0` — từ 6.0 đến dưới 7.0 |
-| Backend foundation | S3; `use_lockfile=true`, `encrypt=true` |
+| Backend (trừ bootstrap) | S3; `use_lockfile=true` (khoá state bằng file `.tflock` trong bucket, không cần DynamoDB), `encrypt=true` |
 | Bucket backend | Makefile truyền lúc `init`: `geolife-<account_id>-tfstate` |
-| Default tags | `Project=geolife`; `Stack=bootstrap` hoặc `foundation` |
-| Tên dùng chung của foundation | `local.name = "geolife"` |
+| Default tags | `Project=geolife`; `Stack=<tên stack>` |
+| Tên dùng chung | `local.name = "geolife"` |
 | Account ID | Đọc tài khoản AWS đang sử dụng qua `aws_caller_identity` |
 
-## 2. Các biến đang cấu hình
+## 2. Các biến chung và của foundation
 
 | Biến | Giá trị mặc định | Cấu hình gì? |
 |---|---|---|
-| Terraform `region` | `ap-southeast-1` | Region của AWS provider; có ở cả hai stack |
+| Terraform `region` | `ap-southeast-1` | Region của AWS provider; có ở mọi stack |
 | `alert_email` | Phải cung cấp | Email nhận cảnh báo ngân sách foundation |
 | `monthly_budget_usd` | `20` | Ngân sách tháng, đơn vị USD |
 | `vpc_cidr` | `10.20.0.0/16` | Dải IP của VPC và cơ sở chia subnet |
@@ -89,14 +100,14 @@ Ví dụ: database       Ví dụ: public endpoint AWS
                      và security group cho phép
 ```
 
-Public subnet có đường ra Internet nhưng không tự gán public IP. Theo thiết kế trong comment, ECS task sau này dùng `assign_public_ip` để đi theo đường này. Private subnet hiện không có đường Internet qua NAT.
+Public subnet có đường ra Internet nhưng không tự gán public IP. ECS task (service API và task `geolife-ops`) xin public IP bằng `assign_public_ip` để đi theo đường này. Private subnet không có đường Internet.
 
 ## 4. Security group: ai kết nối tới ai?
 
 ```text
 Người dùng
     │
-    │ Rule vào ALB: chưa khai báo trong foundation
+    │ TCP 80 từ allowed_cidr: rule nằm ở stack serving
     ▼
   [ALB] ───── TCP 8000 ─────► [ECS task] ───── TCP 5432 ─────► [RDS]
                                   │
@@ -104,7 +115,7 @@ Người dùng
                                      Đường đi thực tế phụ thuộc route/IP
 ```
 
-Foundation chỉ tạo security group. RDS và task definition `geolife-ops` nằm ở stack `data`; ALB và ECS service nằm ở stack `serving`.
+Foundation tạo security group và các rule nội bộ. Rule vào ALB nằm ở stack `serving` vì nguồn được phép (IP của máy chạy `make aws-up`) đổi theo mạng; RDS gắn SG `rds` ở stack `data`.
 
 | Rule | Nhóm áp dụng | Hướng | Nguồn / đích | Cho phép |
 |---|---|---|---|---|
@@ -141,7 +152,7 @@ geolife-ecs-execution                      geolife-ecs-task
 | Phạm vi secret | `arn:aws:secretsmanager:<region>:<account_id>:secret:rds!*` |
 | Task inline policy | `ListBucket`, `GetObject`, `PutObject` theo prefix bên dưới |
 
-Trust policy quyết định **ai được nhận role**; permission policy quyết định **nhận role rồi được làm gì**. Mẫu `rds!*` có thể khớp nhiều secret; foundation chưa tạo secret này. Task definition sau này cần gắn các role bằng ARN.
+Trust policy quyết định **ai được nhận role**; permission policy quyết định **nhận role rồi được làm gì**. Secret `rds!…` do RDS tạo khi bật `manage_master_user_password` (stack `data`); foundation dùng mẫu `rds!*` vì tên secret chỉ có sau khi RDS được tạo. Mọi task definition (stack `data` và `serving`) gắn hai role này bằng ARN.
 
 **Ma trận quyền S3 của task role:**
 
@@ -164,7 +175,7 @@ Nguồn: [`bootstrap/main.tf`](../../infra/bootstrap/main.tf), [`storage.tf`](..
 ```text
 AWS
 ├── S3: geolife-<account_id>-tfstate
-│   └── foundation/terraform.tfstate       Bản ghi quản lý hạ tầng
+│   └── <stack>/terraform.tfstate          State của foundation, data, serving
 ├── S3: geolife-<account_id>-artifacts
 │   ├── data/preprocess/                   Dữ liệu đã xử lý
 │   ├── models/<model>/v=<n>/              Model và manifest
@@ -202,9 +213,9 @@ Immutable tag không ngăn lifecycle xóa image cũ.
 
 | Tài nguyên / cấu hình | Giá trị | Ý nghĩa |
 |---|---|---|
-| ECS cluster | `geolife` | Nơi tổ chức task/service; chưa chạy container |
+| ECS cluster | `geolife` | Nơi chạy service API và task `geolife-ops` |
 | Container Insights | `disabled` | Tắt tính năng này trên cluster |
-| CloudWatch log group | `/ecs/geolife` | Nơi nhận log khi task sau này cấu hình gửi vào |
+| CloudWatch log group | `/ecs/geolife` | Log của mọi task; stream prefix `ops` hoặc `api-<slot>` |
 | Log retention | `14` ngày mặc định | Lấy từ `log_retention_days` |
 | Budget | `geolife-monthly`, `COST`, `USD`, `MONTHLY` | Theo dõi chi phí tháng |
 | Budget limit | `20` USD mặc định | Lấy từ `monthly_budget_usd` |
@@ -213,7 +224,7 @@ Immutable tag không ngăn lifecycle xóa image cũ.
 | Credit / refund | Cả hai `include_...=false` | Không tính các khoản điều chỉnh này vào budget |
 | Budget filter | Không khai báo | Không giới hạn riêng tài nguyên có tag Geolife |
 
-Budget chỉ cảnh báo, không tự dừng tài nguyên. Foundation không tạo NAT/ALB/RDS nhưng lưu trữ, log và thao tác dịch vụ vẫn có thể phát sinh chi phí.
+Budget chỉ cảnh báo, không tự dừng tài nguyên; số liệu chi phí trễ khoảng một ngày. Phần tốn tiền chính nằm ở stack `data` (RDS) và `serving` (ALB, task).
 
 ## 8. Outputs: foundation đưa gì cho stack tiếp theo?
 
@@ -228,7 +239,7 @@ Foundation
     └─ Cluster/log group ──────────────► Chọn nơi chạy và nơi gửi log
                                             │
                                   Stack data (infra/data)
-                                  và serving (bước 2.2)
+                                  và serving (infra/serving)
 ```
 
 | Nhóm | Outputs |
@@ -240,7 +251,7 @@ Foundation
 | IAM | `execution_role_arn`, `task_role_arn` |
 | Compute/log | `ecs_cluster_name`, `ecs_cluster_arn`, `log_group_name` |
 
-Comment dự kiến consumer đọc qua `terraform_remote_state`. Outputs không tự tạo consumer hay cấp quyền đọc state.
+Stack `data` và `serving` đọc các output này qua `terraform_remote_state`; người chạy Terraform cần quyền đọc bucket state.
 
 ```text
 Muốn ứng dụng đọc được model trên S3
@@ -254,3 +265,142 @@ Route + IP + SG         Task role + bucket policy
                  ▼
        Đọc object model qua SDK
 ```
+
+## 9. Stack data: RDS và task `geolife-ops`
+
+Nguồn: [`rds.tf`](../../infra/data/rds.tf), [`ops_task.tf`](../../infra/data/ops_task.tf), [`variables.tf`](../../infra/data/variables.tf).
+
+```text
+foundation outputs ──► data
+  private_subnet_ids      ├─ aws_db_subnet_group "geolife" (2 private subnet)
+  rds_security_group_id   ├─ aws_db_instance "geolife" ──► secret rds!… (Secrets Manager, RDS tự tạo)
+  execution/task role     └─ aws_ecs_task_definition "geolife-ops"
+  ecr_repository_url           image ghim theo digest, DB_* lấy từ aws_db_instance
+```
+
+**RDS** (`aws_db_instance.main`):
+
+| Cấu hình | Giá trị | Ghi chú |
+|---|---|---|
+| Engine | PostgreSQL `17` | Cùng major với `postgres:17` ở local; minor do AWS chọn và tự nâng (`auto_minor_version_upgrade`) |
+| Instance | `db.t4g.micro` (`db_instance_class`) | 2 vCPU burstable, 1 GB RAM |
+| Ổ đĩa | gp3 `20` GB (`db_allocated_storage_gb`), mã hoá | gp3 dưới 400 GB: 3 000 IOPS, 125 MB/s cố định |
+| DB / user | `geolife` / `geolife` | |
+| Mật khẩu | `manage_master_user_password = true` | RDS sinh và lưu trong Secrets Manager; không nằm trong state |
+| Mạng | Subnet group 2 private subnet, SG `rds`, `publicly_accessible = false`, `multi_az = false` | Chỉ task trong VPC kết nối được |
+| Backup | `backup_retention_period = 1`, `skip_final_snapshot = true`, `deletion_protection = false` | Dữ liệu dựng lại được từ S3 bằng `make aws-seed` |
+| Áp dụng thay đổi | `apply_immediately = true` | Không chờ maintenance window |
+| Theo dõi | Performance Insights và Enhanced Monitoring tắt | Chỉ dùng metric cơ bản trong CloudWatch |
+| Parameter group | Mặc định của RDS (`default.postgres17`) | |
+
+RDS đang stop vẫn tính phí ổ đĩa; AWS tự start lại một instance đã stop quá 7 ngày.
+
+**Task definition `geolife-ops`** (lệnh chạy một lần trong VPC: migrate, seed, kiểm tra DB):
+
+| Cấu hình | Giá trị |
+|---|---|
+| CPU / RAM | 1 vCPU / 2 GB; `ecs_run.py --memory` đổi RAM cho riêng một lần chạy |
+| Kiến trúc | Fargate, Linux ARM64 |
+| Image | `geolife-api` ghim theo digest; `image_tag = null` lấy image mới nhất trong ECR |
+| Lệnh mặc định | `python -m geolife_api.migrate`; `ecs_run.py` ghi đè bằng command override |
+| Biến môi trường | `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `AWS_REGION` |
+| Secret | `DB_PASSWORD` = khoá `password` của secret `rds!…` |
+| Log | `/ecs/geolife`, stream `ops/ops/<task id>` |
+
+Image được ghim lúc `terraform apply`, nên sau `make aws-push` cần apply lại stack `data` để task `geolife-ops` dùng image mới.
+
+| Output | Dùng bởi |
+|---|---|
+| `db_host`, `db_port`, `db_name`, `db_user`, `db_secret_arn` | Stack `serving` (biến môi trường và secret của task API) |
+| `db_identifier` | Tham khảo; Makefile dùng `DB_ID = geolife` |
+| `ops_task_definition_arn`, `ops_image` | `scripts/ecs_run.py` |
+
+## 10. Stack serving: ALB và hai slot API
+
+Nguồn: [`infra/serving/`](../../infra/serving/).
+
+```text
+models.auto.tfvars.json ──► local.active_slots (slot có version)
+  blue_model_version          ├─ aws_ecs_task_definition "geolife-api-<slot>"   MODEL_URI = s3://…/v=<N>/model
+  green_model_version         └─ aws_ecs_service "api-<slot>" ──► target group "geolife-api-<slot>"
+  live_slot, canary_weight ──► local.weights ──► listener :80 (forward có trọng số)
+                                 local.other_slot ──► rule X-Canary: 1
+```
+
+**Biến** ([`variables.tf`](../../infra/serving/variables.tf)):
+
+| Biến | Mặc định | Ai đặt |
+|---|---|---|
+| `allowed_cidr` | Bắt buộc | `make aws-up` truyền IP công khai của máy (`/32`) |
+| `blue_model_version`, `green_model_version` | `null` (slot không chạy) | `make aws-promote` ghi vào `models.auto.tfvars.json` |
+| `live_slot` | `blue` | Như trên |
+| `canary_weight` | `0` (0–100) | Như trên; sửa tay để tăng dần canary |
+| `image_tag` | `null` (image mới nhất trong ECR) | Truyền `-var` khi cần chạy một build cụ thể |
+| `model_name` | `geolife_home_office` | Thư mục dưới `models/` trên S3 |
+| `api_cpu` / `api_memory` | `512` / `2048` | 0,5 vCPU / 2 GB theo [`task_sizing.md`](../task_sizing.md) B3 |
+
+Terraform tự nạp file `*.auto.tfvars.json` trong thư mục stack, nên không cần `-var-file`.
+
+**ALB** ([`alb.tf`](../../infra/serving/alb.tf)):
+
+| Tài nguyên | Cấu hình |
+|---|---|
+| Rule vào SG `alb` | TCP 80 từ `allowed_cidr` |
+| `aws_lb.api` | `geolife-api`, application, internet-facing, 2 public subnet, `idle_timeout = 60` giây |
+| Target group `geolife-api-blue` / `-green` | HTTP 8000, `target_type = ip` (bắt buộc với Fargate `awsvpc`), `deregistration_delay = 30` giây |
+| Health check | `GET /v1/health` cần `200`; mỗi 15 giây, timeout 5 giây; 2 lần đạt thì khoẻ, 3 lần trượt thì không khoẻ |
+| Listener :80 | Forward tới hai target group, trọng số `local.weights` (live slot `100 − canary_weight`, slot còn lại `canary_weight`) |
+| Rule `canary_header` (priority 10) | Header `X-Canary: 1` → target group của `other_slot` |
+
+`/v1/health` trả `503` khi model chưa nạp xong hoặc DB không kết nối được, nên ALB không gửi request tới task chưa sẵn sàng. Request chạy quá `idle_timeout` bị ALB cắt với `504`.
+
+**Task definition và service của mỗi slot** ([`ecs.tf`](../../infra/serving/ecs.tf)):
+
+| Cấu hình | Giá trị |
+|---|---|
+| Kiến trúc | Fargate, Linux ARM64 |
+| Image | `geolife-api` ghim theo digest (như `geolife-ops`) |
+| Biến môi trường | `MODEL_URI` (bản phát hành trên S3, task không gọi registry), `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `AWS_REGION` |
+| Secret | `DB_PASSWORD` = khoá `password` của secret `rds!…` |
+| Log | `/ecs/geolife`, stream prefix `api-<slot>` |
+| `desired_count` | `1` |
+| Mạng | 2 public subnet, SG `task`, `assign_public_ip = true` |
+| `health_check_grace_period_seconds` | `120`: bỏ qua health check của ALB khi task đang tải model và chạy thử |
+| Rolling update | `minimum_healthy_percent = 100`, `maximum_percent = 200`: task mới khoẻ rồi mới dừng task cũ |
+| Circuit breaker | Bật, `rollback = true`: deploy không lên được thì quay về task definition trước |
+| `wait_for_steady_state` | `true`: `terraform apply` chỉ xong khi service ổn định |
+
+| Output | Ý nghĩa |
+|---|---|
+| `url` | `http://<DNS của ALB>`; `make aws-url` in giá trị này |
+| `image` | Image (theo digest) đang chạy |
+| `slots` | Mỗi slot: `model_version`, `weight`, `live` |
+
+## 11. Makefile: các lệnh AWS
+
+Nguồn: [`Makefile`](../../Makefile), phần `# ---- AWS ----`.
+
+| Biến | Giá trị | Ghi chú |
+|---|---|---|
+| `AWS_PROFILE` | `geolife-dev` (export) | aws CLI, Terraform, boto3 đều đọc; đổi bằng `make <lệnh> AWS_PROFILE=...` |
+| `AWS_REGION` | `ap-southeast-1` (export) | |
+| `AWS_ACCOUNT` | `aws sts get-caller-identity` | Gán bằng `=`: chỉ gọi khi lệnh cần |
+| `ECR_REPO` | `<account>.dkr.ecr.<region>.amazonaws.com/geolife-api` | |
+| `IMAGE` | `geolife-api:<git SHA 12 ký tự>` | |
+| `ARTIFACTS_BUCKET`, `STATE_BUCKET` | `geolife-<account>-artifacts`, `geolife-<account>-tfstate` | |
+| `MY_CIDR` | IP công khai từ `checkip.amazonaws.com` + `/32` | Nguồn duy nhất được gọi ALB |
+| `DB_ID` | `geolife` | Identifier của RDS |
+
+GNU make 3.81 (bản đi kèm macOS) không truyền biến `export` vào `$(shell …)`, nên các biến gọi lệnh AWS truyền `AWS_PROFILE` tường minh.
+
+| Nhóm | Lệnh | Việc làm |
+|---|---|---|
+| Image, model | `aws-build`, `aws-push` | Build `linux/arm64` (không đính kèm provenance / SBOM), push lên ECR; từ chối khi còn thay đổi chưa commit |
+| | `aws-publish-model V=<n>` | Sao version `n` từ registry sang S3 kèm manifest |
+| | `aws-promote` | Đọc alias, phát hành nếu thiếu, ghi `models.auto.tfvars.json` (`ARGS=--champion-only`) |
+| DB | `aws-migrate`, `aws-seed`, `aws-db-count` | Chạy trong task `geolife-ops` qua `ecs_run.py` (`MEMORY=<MB>` đổi RAM) |
+| | `aws-db-start`, `aws-db-stop` | Start / stop RDS và chờ tới trạng thái đích; bỏ qua nếu đã ở trạng thái đó |
+| Serving | `aws-up` | `aws-db-start`, rồi `terraform apply` stack `serving` với `allowed_cidr = MY_CIDR` |
+| | `aws-down` | `terraform destroy` stack `serving`, rồi `aws-db-stop` (tắt service trước để task không bị thay liên tục khi mất DB) |
+| | `aws-url`, `aws-smoke` | In URL; gọi `/v1/health`, một user có dữ liệu, một user không có, một đường dẫn không có, kiểm mã trả về |
+| Terraform | `tf-init`, `tf-plan`, `tf-apply`, `tf-output` với `S=<stack>` | `tf-init` truyền bucket backend (trừ `bootstrap`) |
