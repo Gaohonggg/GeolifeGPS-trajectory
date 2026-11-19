@@ -1,6 +1,7 @@
-"""Test trên stack docker đang chạy (make setup): contract và kết quả end-to-end qua DB + registry.
+"""Test trên API đang chạy: contract và kết quả end-to-end qua DB + model.
 
-    API_URL=http://localhost:8000 uv run pytest -m integration
+    API_URL=http://localhost:8000 uv run pytest -m integration      # stack docker ở local (make setup)
+    API_URL=$(make -s aws-url) uv run pytest -m integration         # ALB trên AWS (make aws-up)
 """
 from __future__ import annotations
 
@@ -10,7 +11,7 @@ import httpx
 import numpy as np
 import pytest
 import schemathesis
-from schemathesis.specs.openapi.checks import ignored_auth, positive_data_acceptance
+from schemathesis.specs.openapi.checks import ignored_auth, positive_data_acceptance, unsupported_method
 
 from geolife.paths import ROOT
 
@@ -42,6 +43,9 @@ def test_contract(case):
     if response.status_code == 400 and response.json()["error"]["code"] == "invalid_time_range":
         # start >= end hợp lệ theo schema (OpenAPI không diễn tả được ràng buộc giữa hai tham số) nhưng spec yêu cầu 400
         excluded.append(positive_data_acceptance)
+    if case.method.upper() == "TRACE" and "json" not in response.headers.get("content-type", ""):
+        # ALB tự trả 405 (trang HTML, không có header Allow) cho TRACE, request không tới API
+        excluded.append(unsupported_method)
     case.validate_response(response, excluded_checks=excluded)
 
 

@@ -49,7 +49,7 @@ def run(command: list[str], memory_mb: int | None = None) -> int:
         raise SystemExit(f"run_task lỗi: {resp['failures']}")
     task_arn = resp["tasks"][0]["taskArn"]
     task_id = task_arn.rsplit("/", 1)[-1]
-    stream = f"ops/ops/{task_id}"
+    stream = f"ops/ops/{task_id}"   # <awslogs-stream-prefix>/<tên container>/<task id>
     print(f"task {task_id}: {' '.join(command)}", flush=True)
 
     t0, status, token = time.monotonic(), None, None

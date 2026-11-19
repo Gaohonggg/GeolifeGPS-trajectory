@@ -85,15 +85,53 @@ aws-db-count:   ## số user và số điểm trên RDS
 		c = psycopg.connect(DbSettings().db_conninfo); \
 		print(c.execute('SELECT (SELECT count(*) FROM users), (SELECT count(*) FROM gps_points)').fetchone())"
 
-aws-db-stop:    ## stop RDS sau mỗi phiên (chỉ còn phí ổ đĩa; AWS tự bật lại sau 7 ngày)
-	aws rds stop-db-instance --db-instance-identifier $(DB_ID) --query DBInstance.DBInstanceStatus --output text
-	@# aws rds wait không có waiter cho trạng thái stopped
-	@until [ "$$(aws rds describe-db-instances --db-instance-identifier $(DB_ID) \
-		--query 'DBInstances[0].DBInstanceStatus' --output text)" = stopped ]; do sleep 20; done; echo stopped
+DB_STATUS = aws rds describe-db-instances --db-instance-identifier $(DB_ID) --query 'DBInstances[0].DBInstanceStatus' --output text
 
-aws-db-start:
-	aws rds start-db-instance --db-instance-identifier $(DB_ID) --query DBInstance.DBInstanceStatus --output text
+aws-db-stop:    ## stop RDS sau mỗi phiên (chỉ còn phí ổ đĩa; AWS tự bật lại sau 7 ngày)
+	@if [ "$$($(DB_STATUS))" = available ]; then \
+		aws rds stop-db-instance --db-instance-identifier $(DB_ID) --query DBInstance.DBInstanceStatus --output text; fi
+	@# aws rds wait không có waiter cho trạng thái stopped
+	@until [ "$$($(DB_STATUS))" = stopped ]; do sleep 20; done; echo "RDS: stopped"
+
+aws-db-start:   ## start RDS và chờ tới khi sẵn sàng (bỏ qua nếu đang chạy)
+	@if [ "$$($(DB_STATUS))" = stopped ]; then \
+		aws rds start-db-instance --db-instance-identifier $(DB_ID) --query DBInstance.DBInstanceStatus --output text; fi
 	aws rds wait db-instance-available --db-instance-identifier $(DB_ID)
+
+# ---- API trên AWS (stack serving) ----
+SERVING   = terraform -chdir=infra/serving
+# IP công khai của máy chạy lệnh; ALB chỉ nhận cổng 80 từ IP này.
+MY_CIDR   = $(shell curl -fsS https://checkip.amazonaws.com)/32
+API_URL   = $(shell AWS_PROFILE=$(AWS_PROFILE) $(SERVING) output -raw url 2>/dev/null)
+SMOKE_USER ?= 5
+
+.PHONY: aws-promote aws-up aws-down aws-smoke aws-url
+
+aws-promote:    ## đọc @champion / @challenger, phát hành nếu thiếu, ghi models.auto.tfvars.json (ARGS=--champion-only)
+	uv run python scripts/promote.py $(ARGS)
+
+aws-up: aws-db-start  ## start RDS, dựng ALB + service theo models.auto.tfvars.json, in URL
+	$(SERVING) apply -auto-approve -var allowed_cidr=$(MY_CIDR)
+	@echo "API: $$($(SERVING) output -raw url)"
+
+# Tắt service trước, stop RDS sau: DB mất kết nối thì task báo không khoẻ và bị ECS thay liên tục.
+aws-down:       ## destroy stack serving rồi stop RDS
+	$(SERVING) destroy -auto-approve -var allowed_cidr=0.0.0.0/32
+	$(MAKE) aws-db-stop
+
+aws-url:        ## URL của ALB khi stack serving đang chạy
+	@echo $(API_URL)
+
+aws-smoke:      ## gọi các endpoint qua ALB, kiểm mã trả về
+	@test -n "$(API_URL)" || { echo "stack serving chưa chạy (make aws-up)"; exit 1; }
+	@fail=0; \
+	expect() { want=$$1; shift; code=$$(curl -s -o /dev/null -w '%{http_code}' --max-time 60 "$$@"); \
+		if [ "$$code" = "$$want" ]; then echo "ok   $$code $$*"; else echo "FAIL $$code (cần $$want) $$*"; fail=1; fi; }; \
+	expect 200 $(API_URL)/v1/health; \
+	expect 200 -X POST $(API_URL)/v1/users/$(SMOKE_USER)/predictions; \
+	expect 404 -X POST $(API_URL)/v1/users/999999/predictions; \
+	expect 404 $(API_URL)/khong-co; \
+	exit $$fail
 
 # ---- Terraform: make tf-<lệnh> S=<stack>, vd. make tf-plan S=foundation ----
 # bootstrap giữ state ở local; các stack khác lưu state trong bucket do bootstrap tạo.
