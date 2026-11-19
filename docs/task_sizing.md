@@ -176,7 +176,7 @@ Chi phí đọc heap của index scan được nội suy giữa hai trường h�
 | 14 | 431 078 (được chọn) | 592 611 | 15,2 giây | 0,40 giây |
 | 153 | 724 053 (được chọn) | 3 250 112 | 22,5 giây | 1,8 giây |
 
-Planner tính index scan của user 153 đắt gấp 4,5 lần seq scan, trong khi thực tế nó nhanh hơn 12 lần. Hai giả định cộng dồn: `random_page_cost = 4` là giá trị cho ổ quay, và hệ số 0,75 làm phần lớn số trang bị tính như đọc ngẫu nhiên.
+Planner tính index scan của user 153 đắt gấp 4,5 lần seq scan, trong khi thực tế nó nhanh hơn 4–12 lần (1,8 giây khi các trang của user còn trong page cache của hệ điều hành sau lượt seq scan đo ngay trước; 5,5 giây khi đọc hết từ đĩa, xem phần sau khi sửa). Hai giả định cộng dồn: `random_page_cost = 4` là giá trị cho ổ quay, và hệ số 0,75 làm phần lớn số trang bị tính như đọc ngẫu nhiên.
 
 ### Thử cấu hình planner
 
@@ -203,6 +203,41 @@ RDS báo `CPUCreditBalance = 0` trong suốt phép đo (T4g của RDS chạy ở
 | Instance có RAM chứa được bảng và index (2,6 GB; từ `db.t4g.medium`, 4 GB) | Seq scan đọc từ bộ nhớ, nhưng vẫn quét cả bảng cho mỗi request. Giá theo giờ gấp 4 lần trở lên, và bảng tăng theo dữ liệu | Không |
 | Index riêng trên `user_id` (một cột, tương quan 1,0) | Planner chọn đúng index, nhưng tốn thêm vài trăm MB và vẫn phải sort theo `ts_utc` | Không |
 | Partition `gps_points` theo user | Seq scan chỉ quét partition của user, nhưng phải đổi schema và seed | Không |
+
+### Sau khi sửa
+
+Đo ngày 2026-11-19: parameter group `geolife` (`random_page_cost = 1.1`) đã áp dụng sau reboot, `fetch_points` đặt `SET LOCAL enable_seqscan = off` và `enable_bitmapscan = off`. Cùng cỡ task và RDS như trên, cache của RDS lạnh sau reboot.
+
+**Thời gian đọc điểm từ RDS** (`Database.fetch_points` trong task cùng VPC, hai lần gọi):
+
+| User | Trước | Sau | Kế hoạch truy vấn |
+| --- | --- | --- | --- |
+| 83 | 0,15 giây | 0,16 / 0,16 giây | Index scan |
+| 14 | 15,2 / 14,9 giây | 1,22 / 1,43 giây | Index scan, đọc 5 494 trang |
+| 153 | 22,5 giây | 10,8 / 9,7 giây | Index scan, đọc 30 587 trang (22 320 trang heap và các trang index) |
+
+**Thời gian một request qua ALB** (giây, ba lần gọi):
+
+| User | Trước | Sau |
+| --- | --- | --- |
+| 83 | 0,50 / 0,46 / 0,40 | 0,33 / 0,41 / 0,34 |
+| 14 | 16,3 / 15,9 / 15,6 | 2,41 / 1,97 / 2,02 |
+| 153 | 26,6 / 27,3 / 26,8 | 14,3 / 14,2 / 14,5 |
+
+**Thời gian đọc của user 153, tách theo bước** (hai lần, giây):
+
+| Bước | Thời gian |
+| --- | --- |
+| Thực thi truy vấn trên RDS (`EXPLAIN ANALYZE` của đúng câu `SELECT` trong `COPY`) | 5,5 / 5,5 |
+| `COPY` tới lúc client nhận xong 173 MB CSV (gồm bước trên) | 9,6 / 10,3 |
+| pyarrow đọc CSV thành bảng | 0,8 / 0,8 |
+
+**Output cho thấy:**
+
+- User phân vị 90 đọc nhanh hơn khoảng 11 lần, request nhanh hơn khoảng 8 lần. User trung vị không đổi vì vốn đã dùng index scan.
+- User lớn nhất nhanh hơn khoảng 2 lần, nhưng vẫn 14 giây mỗi request. Index scan đọc từng trang 8 KB một, nên 30 587 trang lạnh mất khoảng 5,5 giây (khoảng 0,18 ms mỗi trang). Phần còn lại của `COPY` là định dạng 2,16 triệu dòng thành CSV trên RDS và truyền 173 MB.
+- Phần còn lại của request user 153, khoảng 4 giây (14,3 trừ 9,7–10,8 giây của `fetch_points`, đã gồm bước đọc CSV), là thời gian chạy model.
+
 
 ## Giới hạn của phép đo
 

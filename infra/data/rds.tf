@@ -6,6 +6,18 @@ resource "aws_db_subnet_group" "main" {
   subnet_ids = local.foundation.private_subnet_ids
 }
 
+# random_page_cost mặc định 4 giả định ổ quay; gp3 là SSD nên đọc ngẫu nhiên gần bằng đọc tuần tự.
+# (docs/task_sizing.md, B5). Đổi parameter group của instance chỉ có hiệu lực sau khi reboot hoặc stop / start.
+resource "aws_db_parameter_group" "main" {
+  name   = local.name
+  family = "postgres17"
+
+  parameter {
+    name  = "random_page_cost"
+    value = "1.1"
+  }
+}
+
 resource "aws_db_instance" "main" {
   identifier     = local.name
   engine         = "postgres"
@@ -20,6 +32,7 @@ resource "aws_db_instance" "main" {
   username                    = local.name
   manage_master_user_password = true
 
+  parameter_group_name   = aws_db_parameter_group.main.name
   db_subnet_group_name   = aws_db_subnet_group.main.name
   vpc_security_group_ids = [local.foundation.rds_security_group_id]
   publicly_accessible    = false

@@ -48,6 +48,10 @@ class Database:
         """Điểm trong [start, end), sort theo thời gian, ts_utc dạng naive UTC.
 
         Dùng COPY + pyarrow thay vì fetch từng dòng: một user có thể có hàng triệu điểm.
+
+        Truy vấn ép index scan trên khoá chính (user_id, ts_utc): đọc đúng các trang của user, ra sẵn thứ tự ts_utc.
+        Planner ước lượng index scan nhiều cột đắt hơn thực tế nên chọn quét cả bảng cho user lớn; khi bảng không
+        nằm gọn trong RAM, đọc user phân vị 90 mất 15 giây thay vì 1,3 giây (docs/task_sizing.md, B5).
         """
         where = [sql.SQL("user_id = {}").format(sql.Literal(user_id))]
         if start is not None:
@@ -59,6 +63,10 @@ class Database:
             "FROM gps_points WHERE {} ORDER BY ts_utc) TO STDOUT (FORMAT csv, HEADER)"
         ).format(sql.SQL(" AND ").join(where))
         with self.pool.connection() as conn, conn.cursor() as cur:
+            # SET LOCAL hết hiệu lực khi transaction kết thúc, không ảnh hưởng lần dùng connection sau.
+            # Tắt cả bitmap scan: bitmap heap scan không giữ thứ tự ts_utc nên vẫn phải sort.
+            cur.execute("SET LOCAL enable_seqscan = off")
+            cur.execute("SET LOCAL enable_bitmapscan = off")
             buf = io.BytesIO()
             with cur.copy(query) as copy:
                 for chunk in copy:

@@ -291,7 +291,7 @@ foundation outputs ──► data
 | Backup | `backup_retention_period = 1`, `skip_final_snapshot = true`, `deletion_protection = false` | Dữ liệu dựng lại được từ S3 bằng `make aws-seed` |
 | Áp dụng thay đổi | `apply_immediately = true` | Không chờ maintenance window |
 | Theo dõi | Performance Insights và Enhanced Monitoring tắt | Chỉ dùng metric cơ bản trong CloudWatch |
-| Parameter group | Mặc định của RDS (`default.postgres17`) | |
+| Parameter group | `geolife` (family `postgres17`): `random_page_cost = 1.1` | Ổ gp3 là SSD; mặc định 4 giả định ổ quay ([`task_sizing.md`](../task_sizing.md) B5). Đổi parameter group chỉ có hiệu lực sau reboot hoặc stop / start |
 
 RDS đang stop vẫn tính phí ổ đĩa; AWS tự start lại một instance đã stop quá 7 ngày.
 
