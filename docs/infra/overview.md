@@ -1,6 +1,6 @@
 # Hạ tầng AWS: tổng quan
 
-Trang này vẽ các thành phần và quan hệ giữa chúng. Giá trị cấu hình của từng stack (CIDR, quyền IAM, cỡ RDS, health check…) ở [`config_relation.md`](config_relation.md); số đo RAM / thời gian ở [`../task_sizing.md`](../task_sizing.md).
+Trang này vẽ các thành phần và quan hệ giữa chúng. Giá trị cấu hình của từng stack (CIDR, quyền IAM, cỡ RDS, health check…) ở [`config_relation.md`](config_relation.md); số đo RAM / thời gian ở [`../task_sizing.md`](../task_sizing.md); các concept nền (state, IAM role, S3 versioning, SQS, health check, rolling update…) ở [`knowledges.md`](knowledges.md).
 
 ## 1. Code nằm đâu, chạy ở đâu
 
