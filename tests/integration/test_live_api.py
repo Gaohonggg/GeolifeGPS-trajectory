@@ -1,7 +1,6 @@
-"""Test trên API đang chạy: contract và kết quả end-to-end qua DB + model.
+"""Test trên API đang chạy: contract và kết quả end-to-end qua nguồn điểm + model.
 
-    API_URL=http://localhost:8000 uv run pytest -m integration      # stack docker ở local (make setup)
-    API_URL=$(make -s aws-url) uv run pytest -m integration         # ALB trên AWS (make aws-up)
+    API_URL=<url của API> uv run pytest -m integration
 """
 from __future__ import annotations
 
@@ -11,7 +10,7 @@ import httpx
 import numpy as np
 import pytest
 import schemathesis
-from schemathesis.specs.openapi.checks import ignored_auth, positive_data_acceptance, unsupported_method
+from schemathesis.specs.openapi.checks import ignored_auth, positive_data_acceptance
 
 from geolife.paths import ROOT
 
@@ -43,14 +42,11 @@ def test_contract(case):
     if response.status_code == 400 and response.json()["error"]["code"] == "invalid_time_range":
         # start >= end hợp lệ theo schema (OpenAPI không diễn tả được ràng buộc giữa hai tham số) nhưng spec yêu cầu 400
         excluded.append(positive_data_acceptance)
-    if case.method.upper() == "TRACE" and "json" not in response.headers.get("content-type", ""):
-        # ALB tự trả 405 (trang HTML, không có header Allow) cho TRACE, request không tới API
-        excluded.append(unsupported_method)
     case.validate_response(response, excluded_checks=excluded)
 
 
 def test_every_user_matches_batch_results():
-    """Mọi user trong DB: kết quả của API khớp predictions.csv của đúng model version đang serve."""
+    """Mọi user có trong results/: kết quả của API khớp predictions.csv của đúng model version đang serve."""
     first = httpx.post(f"{API_URL}/v1/users/5/predictions", timeout=120).json()
     name, version = first["model"]["name"], first["model"]["version"]
     want = expected_predictions(name, version).set_index(["user", "role"])

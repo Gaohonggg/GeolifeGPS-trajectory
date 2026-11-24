@@ -6,8 +6,6 @@ import logging
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from psycopg import OperationalError
-from psycopg_pool import PoolTimeout
 
 log = logging.getLogger(__name__)
 
@@ -36,12 +34,6 @@ def add_handlers(app: FastAPI) -> None:
     @app.exception_handler(RequestValidationError)
     async def _invalid(request: Request, exc: RequestValidationError):
         return error_response(400, "invalid_request", _validation_message(exc))
-
-    @app.exception_handler(PoolTimeout)
-    @app.exception_handler(OperationalError)
-    async def _db_down(request: Request, exc: Exception):
-        log.warning("database unavailable: %s", exc)
-        return error_response(503, "db_unavailable", "database is unavailable")
 
     @app.exception_handler(Exception)
     async def _unexpected(request: Request, exc: Exception):

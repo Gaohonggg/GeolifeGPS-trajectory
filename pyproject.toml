@@ -30,11 +30,8 @@ analysis = [
 serving = [
     "fastapi>=0.162.5",
     "mlflow-skinny>=3.18.0",
-    "psycopg[binary]>=3.3.8",
-    "psycopg-pool>=3.3.3",
     "pyarrow>=26.0.0",
     "pydantic-settings>=2.16.2",
-    "uvicorn>=0.54.0",
     "boto3>=1.44.3",
 ]
 dev = [
@@ -49,12 +46,12 @@ dev = [
 ]
 
 [tool.uv]
-# `uv sync` ở máy local cài đủ mọi nhóm; image của API chỉ cài `serving` (docker/api.Dockerfile)
+# `uv sync` ở máy local cài đủ mọi nhóm; image của API chỉ cài `serving`
 default-groups = ["analysis", "serving", "dev"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["slow: chạy lại model trên toàn bộ dữ liệu", "integration: cần stack docker đang chạy"]
+markers = ["slow: chạy lại model trên toàn bộ dữ liệu", "integration: cần API đang chạy (API_URL)"]
 
 [build-system]
 requires = ["hatchling"]

@@ -1,5 +1,5 @@
 # Bucket artifacts. Bố cục:
-#   data/preprocess/v_<n>/            output của preprocess, nguồn để seed RDS
+#   data/preprocess/v_<n>/            output của preprocess
 #   models/<model>/v=<n>/             bản phát hành bất biến của model version n (geolife.publish)
 #   monitoring/, exports/             baseline drift, log dự đoán xuất ra
 # Mọi đường dẫn gắn với số version; vai trò của version (alias) chỉ nằm trên registry.

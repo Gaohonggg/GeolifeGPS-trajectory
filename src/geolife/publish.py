@@ -1,4 +1,4 @@
-"""Phát hành một version trong registry thành bản sao bất biến trên S3, để ECS task nạp model mà không cần Databricks.
+"""Phát hành một version trong registry thành bản sao bất biến trên S3, để API nạp model mà không cần Databricks.
 
     uv run python -m geolife.publish --version 4 [--bucket geolife-<account_id>-artifacts]
 

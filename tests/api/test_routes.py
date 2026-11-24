@@ -1,10 +1,9 @@
-"""Phần HTTP của API với DB và model giả: mã trả về và định dạng lỗi đúng contract."""
+"""Phần HTTP của API với nguồn điểm và model giả: mã trả về và định dạng lỗi đúng contract."""
 from __future__ import annotations
 
 import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
-from psycopg import OperationalError
 
 from geolife_api.main import State, create_app
 from geolife_api.model import LoadedModel
@@ -13,7 +12,7 @@ from geolife_api.schemas import ModelInfo
 PLACE = {"lat": 40.0, "lon": 116.3, "hours": 10.0, "days": 3, "confidence": 0.9, "regularity": 0.5, "margin": 1.0}
 
 
-class FakeDb:
+class FakeStore:
     def __init__(self, users=None, up=True):
         self.users = users or {}
         self.up = up
@@ -47,9 +46,9 @@ def points(n=3):
     return pd.DataFrame({"user": 5, "ts_utc": ts, "ts_local": ts, "tz": "Asia/Shanghai", "lat": 40.0, "lon": 116.3})
 
 
-def client(db=None, result=None, loaded=True):
+def client(store=None, result=None, loaded=True):
     model = FakeModel(result or {"home": PLACE, "office": {"abstain_reason": "insufficient_workdays"}}) if loaded else None
-    state = State(db or FakeDb({5: points()}), model)
+    state = State(store or FakeStore({5: points()}), model)
     return TestClient(create_app(state=state))
 
 
@@ -115,22 +114,12 @@ def test_model_loading():
 def test_health():
     with client() as c:
         assert c.get("/v1/health").json() == {"status": "ok", "model_loaded": True, "db_connected": True}
-    with client(db=FakeDb(up=False)) as c:
+    with client(store=FakeStore(up=False)) as c:
         assert c.get("/v1/health").status_code == 503
 
 
-def test_db_down():
-    class Down(FakeDb):
-        def user_exists(self, user_id):
-            raise OperationalError("connection refused")
-
-    with client(db=Down({5: points()})) as c:
-        r = c.post("/v1/users/5/predictions")
-    assert r.status_code == 503 and r.json()["error"]["code"] == "db_unavailable"
-
-
 def test_unexpected_error_hides_details():
-    class Broken(FakeDb):
+    class Broken(FakeStore):
         def fetch_points(self, *a, **k):
             raise RuntimeError("secret internals")
 

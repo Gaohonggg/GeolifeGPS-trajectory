@@ -2,12 +2,24 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Protocol
 
 import pandas as pd
 
-from .db import Database
 from .errors import ApiError
 from .model import LoadedModel
+
+
+class PointStore(Protocol):
+    """Nguồn điểm GPS theo user."""
+
+    def ping(self) -> bool:
+        """Nguồn có đọc được không."""
+
+    def user_exists(self, user_id: int) -> bool: ...
+
+    def fetch_points(self, user_id: int, start: datetime | None = None, end: datetime | None = None) -> pd.DataFrame:
+        """Điểm trong [start, end), sort theo thời gian, ts_utc dạng naive UTC; cột theo geolife.models.base.POINT_COLS."""
 
 
 def parse_time(name: str, value: str | None) -> datetime | None:
@@ -21,7 +33,7 @@ def parse_time(name: str, value: str | None) -> datetime | None:
     if t.tzinfo is None:
         raise ApiError(400, "invalid_request", f"{name} must include a UTC offset, e.g. 2008-10-23T02:53:04Z")
     try:
-        # Postgres chỉ nhận offset tới ±15:59, Python nhận tới ±23:59
+        # thời điểm sát năm 1 hoặc năm 9999 tràn khỏi khoảng của datetime khi đổi sang UTC
         return t.astimezone(UTC)
     except OverflowError:
         raise ApiError(400, "invalid_request", f"{name} is out of range") from None
@@ -36,13 +48,13 @@ def _iso(ts: pd.Timestamp) -> str:
     return ts.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def predict_user(db: Database, model: LoadedModel, user_id: int,
+def predict_user(store: PointStore, model: LoadedModel, user_id: int,
                  start: str | None = None, end: str | None = None) -> dict:
     start, end = parse_time("start", start), parse_time("end", end)
     check_time_range(start, end)
-    if not db.user_exists(user_id):
+    if not store.user_exists(user_id):
         raise ApiError(404, "user_not_found", f"user {user_id} not found")
-    points = db.fetch_points(user_id, start, end)
+    points = store.fetch_points(user_id, start, end)
     if points.empty:
         raise ApiError(404, "no_points", f"user {user_id} has no points between {_bound(start)} and {_bound(end)}")
     return {

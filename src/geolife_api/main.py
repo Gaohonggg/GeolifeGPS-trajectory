@@ -1,4 +1,4 @@
-"""FastAPI app: `uvicorn geolife_api.main:app`.
+"""FastAPI app: `create_app(store=...)` với một `PointStore`.
 
 Model nạp ở thread nền; trong lúc chưa nạp xong, /v1/health và endpoint dự đoán trả 503.
 """
@@ -15,19 +15,18 @@ from fastapi.responses import JSONResponse
 
 from . import model as model_lib
 from .config import Settings
-from .db import Database
 from .errors import ApiError, add_handlers
 from .schemas import Health, UserPrediction
-from .service import predict_user
+from .service import PointStore, predict_user
 
 log = logging.getLogger(__name__)
 
 
 class State:
-    """Kết nối DB và model đang serve."""
+    """Nguồn điểm GPS và model đang serve."""
 
-    def __init__(self, db: Database, model: model_lib.LoadedModel | None = None):
-        self.db = db
+    def __init__(self, store: PointStore, model: model_lib.LoadedModel | None = None):
+        self.store = store
         self.model = model
         self.stop = threading.Event()
 
@@ -49,7 +48,7 @@ router = APIRouter(prefix="/v1")
 @router.get("/health", response_model=Health)
 def health(request: Request):
     state: State = request.app.state.geolife
-    h = Health(status="ok", model_loaded=state.model is not None, db_connected=state.db.ping())
+    h = Health(status="ok", model_loaded=state.model is not None, db_connected=state.store.ping())
     if not (h.model_loaded and h.db_connected):
         h.status = "unavailable"
         return JSONResponse(status_code=503, content=h.model_dump())
@@ -62,11 +61,14 @@ def predict(request: Request, user_id: Annotated[int, Path(ge=0)],
     state: State = request.app.state.geolife
     if state.model is None:
         raise ApiError(503, "model_unavailable", "model is loading")
-    return predict_user(state.db, state.model, user_id, start, end)
+    return predict_user(state.store, state.model, user_id, start, end)
 
 
-def create_app(settings: Settings | None = None, state: State | None = None) -> FastAPI:
-    """`state` truyền sẵn (test) thì bỏ qua bước nạp DB và model."""
+def create_app(store: PointStore | None = None, settings: Settings | None = None,
+               state: State | None = None) -> FastAPI:
+    """`state` truyền sẵn (test) thì bỏ qua bước nạp model; nếu không thì cần `store`."""
+    if state is None and store is None:
+        raise ValueError("cần store hoặc state")
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -76,13 +78,11 @@ def create_app(settings: Settings | None = None, state: State | None = None) -> 
             return
         logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
         s = settings or Settings()
-        st = State(Database(s.db_conninfo, s.db_pool_size))
-        st.db.open()
+        st = State(store)
         app.state.geolife = st
         threading.Thread(target=_load_model_forever, args=(st, s.model_uri, s.model_retry_s), daemon=True).start()
         yield
         st.stop.set()
-        st.db.close()
 
     app = FastAPI(title="GeoLife Home/Office API", lifespan=lifespan)
     app.include_router(router)
@@ -94,5 +94,3 @@ def create_app(settings: Settings | None = None, state: State | None = None) -> 
         app.openapi = lambda: spec
     return app
 
-
-app = create_app()

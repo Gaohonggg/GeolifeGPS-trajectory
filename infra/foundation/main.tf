@@ -1,5 +1,5 @@
-# Stack foundation: tài nguyên dùng chung, luôn bật — mạng, bucket artifacts, ECR, IAM role của task, ECS cluster,
-# log group, budget. Không có tài nguyên tính phí theo giờ.
+# Stack foundation: tài nguyên dùng chung, luôn bật: bucket artifacts, ECR, budget.
+# Không có tài nguyên tính phí theo giờ.
 # Tên bucket của backend truyền lúc init: make tf-init S=foundation
 
 terraform {

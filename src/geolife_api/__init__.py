@@ -1,9 +1,7 @@
 """API dự đoán home / office cho một user (contract: docs/openapi.yaml).
 
 - `config`: cấu hình từ biến môi trường.
-- `db`: đọc điểm GPS từ Postgres.
 - `model`: nạp model từ MLflow registry, chuyển output sang response.
-- `service`: logic endpoint, không phụ thuộc HTTP.
+- `service`: logic endpoint, không phụ thuộc HTTP; định nghĩa interface nguồn điểm GPS (`PointStore`).
 - `errors`, `schemas`, `main`: phần HTTP (FastAPI).
-- `migrate`, `seed`: tạo bảng, nạp dữ liệu.
 """
