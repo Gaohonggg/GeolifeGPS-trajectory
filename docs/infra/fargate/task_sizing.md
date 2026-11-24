@@ -1,5 +1,7 @@
 # Cỡ task: số đo RAM và thời gian
 
+> Trang này mô tả phương án ECS Fargate. Code tương ứng nằm ở nhánh [`fargate`](https://github.com/Gaohonggg/GeolifeGPS-trajectory/tree/fargate); mọi đường dẫn code trong trang là đường dẫn trên nhánh đó.
+
 Tài liệu này đo API dưới giới hạn CPU / RAM giống một ECS task để chọn cỡ task. Đo ngày 2026-11-16, commit `3f3e739`.
 
 ## Cách đo

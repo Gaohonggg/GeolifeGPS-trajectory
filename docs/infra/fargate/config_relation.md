@@ -1,6 +1,8 @@
 # Cấu hình và quan hệ hạ tầng AWS
 
-Nguồn: [`infra/`](../../infra/) (bốn stack `bootstrap`, `foundation`, `data`, `serving`) và [`Makefile`](../../Makefile). Các giá trị dưới đây mô tả code đang khai báo. Sơ đồ tổng quan và các luồng chạy: [`overview.md`](overview.md).
+> Trang này mô tả phương án ECS Fargate. Code tương ứng nằm ở nhánh [`fargate`](https://github.com/Gaohonggg/GeolifeGPS-trajectory/tree/fargate); mọi đường dẫn code trong trang là đường dẫn trên nhánh đó.
+
+Nguồn: [`infra/`](https://github.com/Gaohonggg/GeolifeGPS-trajectory/tree/fargate/infra) (bốn stack `bootstrap`, `foundation`, `data`, `serving`) và [`Makefile`](https://github.com/Gaohonggg/GeolifeGPS-trajectory/blob/fargate/Makefile). Các giá trị dưới đây mô tả code đang khai báo. Sơ đồ tổng quan và các luồng chạy: [`overview.md`](overview.md).
 
 | Mục | Stack |
 |---|---|
@@ -58,7 +60,7 @@ Bucket được tạo thật trên AWS. “Local” chỉ vị trí state của 
 
 ## 3. Mạng: VPC, subnet và route
 
-Nguồn: [`network.tf`](../../infra/foundation/network.tf).
+Nguồn: [`network.tf`](https://github.com/Gaohonggg/GeolifeGPS-trajectory/blob/fargate/infra/foundation/network.tf).
 
 ```text
 VPC: 10.20.0.0/16
@@ -128,7 +130,7 @@ Rule tham chiếu SG nhận diện nguồn/đích theo nhóm, không hardcode IP
 
 ## 5. IAM: ai có quyền làm gì?
 
-Nguồn: [`iam.tf`](../../infra/foundation/iam.tf).
+Nguồn: [`iam.tf`](https://github.com/Gaohonggg/GeolifeGPS-trajectory/blob/fargate/infra/foundation/iam.tf).
 
 ```text
 Hạ tầng ECS                          Code bên trong container
@@ -170,7 +172,7 @@ Danh tính chạy Terraform/push image/publish model là credentials bên ngoài
 
 ## 6. Lưu trữ: state, artifacts và image
 
-Nguồn: [`bootstrap/main.tf`](../../infra/bootstrap/main.tf), [`storage.tf`](../../infra/foundation/storage.tf).
+Nguồn: [`bootstrap/main.tf`](https://github.com/Gaohonggg/GeolifeGPS-trajectory/blob/fargate/infra/bootstrap/main.tf), [`storage.tf`](https://github.com/Gaohonggg/GeolifeGPS-trajectory/blob/fargate/infra/foundation/storage.tf).
 
 ```text
 AWS
@@ -197,7 +199,7 @@ Các prefix artifacts là quy ước sử dụng; Terraform không upload dữ l
 | Dọn multipart upload dở dang | Không khai báo | Sau 7 ngày |
 | Expiration bản hiện hành | Không khai báo | `exports/`: 90 ngày |
 
-Versioning không đồng nghĩa bất biến. Bản hiện hành dưới `models/` không có expiration rule, nhưng phiên bản cũ vẫn chịu rule noncurrent 30 ngày. Với bucket versioning, expiration thường tạo delete marker; không phải xóa vĩnh viễn ngay mọi phiên bản. [`publish.py`](../../src/geolife/publish.py) kiểm tra nội dung và ghi manifest sau cùng khi phát hành model.
+Versioning không đồng nghĩa bất biến. Bản hiện hành dưới `models/` không có expiration rule, nhưng phiên bản cũ vẫn chịu rule noncurrent 30 ngày. Với bucket versioning, expiration thường tạo delete marker; không phải xóa vĩnh viễn ngay mọi phiên bản. [`publish.py`](https://github.com/Gaohonggg/GeolifeGPS-trajectory/blob/fargate/src/geolife/publish.py) kiểm tra nội dung và ghi manifest sau cùng khi phát hành model.
 
 | Cấu hình ECR | Giá trị / ý nghĩa |
 |---|---|
@@ -228,7 +230,7 @@ Budget chỉ cảnh báo, không tự dừng tài nguyên; số liệu chi phí 
 
 ## 8. Outputs: foundation đưa gì cho stack tiếp theo?
 
-Nguồn: [`outputs.tf`](../../infra/foundation/outputs.tf).
+Nguồn: [`outputs.tf`](https://github.com/Gaohonggg/GeolifeGPS-trajectory/blob/fargate/infra/foundation/outputs.tf).
 
 ```text
 Foundation
@@ -268,7 +270,7 @@ Route + IP + SG         Task role + bucket policy
 
 ## 9. Stack data: RDS và task `geolife-ops`
 
-Nguồn: [`rds.tf`](../../infra/data/rds.tf), [`ops_task.tf`](../../infra/data/ops_task.tf), [`variables.tf`](../../infra/data/variables.tf).
+Nguồn: [`rds.tf`](https://github.com/Gaohonggg/GeolifeGPS-trajectory/blob/fargate/infra/data/rds.tf), [`ops_task.tf`](https://github.com/Gaohonggg/GeolifeGPS-trajectory/blob/fargate/infra/data/ops_task.tf), [`variables.tf`](https://github.com/Gaohonggg/GeolifeGPS-trajectory/blob/fargate/infra/data/variables.tf).
 
 ```text
 foundation outputs ──► data
@@ -291,7 +293,7 @@ foundation outputs ──► data
 | Backup | `backup_retention_period = 1`, `skip_final_snapshot = true`, `deletion_protection = false` | Dữ liệu dựng lại được từ S3 bằng `make aws-seed` |
 | Áp dụng thay đổi | `apply_immediately = true` | Không chờ maintenance window |
 | Theo dõi | Performance Insights và Enhanced Monitoring tắt | Chỉ dùng metric cơ bản trong CloudWatch |
-| Parameter group | `geolife` (family `postgres17`): `random_page_cost = 1.1` | Ổ gp3 là SSD; mặc định 4 giả định ổ quay ([`task_sizing.md`](../task_sizing.md) B5). Đổi parameter group chỉ có hiệu lực sau reboot hoặc stop / start |
+| Parameter group | `geolife` (family `postgres17`): `random_page_cost = 1.1` | Ổ gp3 là SSD; mặc định 4 giả định ổ quay ([`task_sizing.md`](task_sizing.md) B5). Đổi parameter group chỉ có hiệu lực sau reboot hoặc stop / start |
 
 RDS đang stop vẫn tính phí ổ đĩa; AWS tự start lại một instance đã stop quá 7 ngày.
 
@@ -317,7 +319,7 @@ Image được ghim lúc `terraform apply`, nên sau `make aws-push` cần apply
 
 ## 10. Stack serving: ALB và hai slot API
 
-Nguồn: [`infra/serving/`](../../infra/serving/).
+Nguồn: [`infra/serving/`](https://github.com/Gaohonggg/GeolifeGPS-trajectory/tree/fargate/infra/serving).
 
 ```text
 models.auto.tfvars.json ──► local.active_slots (slot có version)
@@ -327,7 +329,7 @@ models.auto.tfvars.json ──► local.active_slots (slot có version)
                                  local.other_slot ──► rule X-Canary: 1
 ```
 
-**Biến** ([`variables.tf`](../../infra/serving/variables.tf)):
+**Biến** ([`variables.tf`](https://github.com/Gaohonggg/GeolifeGPS-trajectory/blob/fargate/infra/serving/variables.tf)):
 
 | Biến | Mặc định | Ai đặt |
 |---|---|---|
@@ -337,11 +339,11 @@ models.auto.tfvars.json ──► local.active_slots (slot có version)
 | `canary_weight` | `0` (0–100) | Như trên; sửa tay để tăng dần canary |
 | `image_tag` | `null` (image mới nhất trong ECR) | Truyền `-var` khi cần chạy một build cụ thể |
 | `model_name` | `geolife_home_office` | Thư mục dưới `models/` trên S3 |
-| `api_cpu` / `api_memory` | `512` / `2048` | 0,5 vCPU / 2 GB theo [`task_sizing.md`](../task_sizing.md) B3 |
+| `api_cpu` / `api_memory` | `512` / `2048` | 0,5 vCPU / 2 GB theo [`task_sizing.md`](task_sizing.md) B3 |
 
 Terraform tự nạp file `*.auto.tfvars.json` trong thư mục stack, nên không cần `-var-file`.
 
-**ALB** ([`alb.tf`](../../infra/serving/alb.tf)):
+**ALB** ([`alb.tf`](https://github.com/Gaohonggg/GeolifeGPS-trajectory/blob/fargate/infra/serving/alb.tf)):
 
 | Tài nguyên | Cấu hình |
 |---|---|
@@ -354,7 +356,7 @@ Terraform tự nạp file `*.auto.tfvars.json` trong thư mục stack, nên khô
 
 `/v1/health` trả `503` khi model chưa nạp xong hoặc DB không kết nối được, nên ALB không gửi request tới task chưa sẵn sàng. Request chạy quá `idle_timeout` bị ALB cắt với `504`.
 
-**Task definition và service của mỗi slot** ([`ecs.tf`](../../infra/serving/ecs.tf)):
+**Task definition và service của mỗi slot** ([`ecs.tf`](https://github.com/Gaohonggg/GeolifeGPS-trajectory/blob/fargate/infra/serving/ecs.tf)):
 
 | Cấu hình | Giá trị |
 |---|---|
@@ -378,7 +380,7 @@ Terraform tự nạp file `*.auto.tfvars.json` trong thư mục stack, nên khô
 
 ## 11. Makefile: các lệnh AWS
 
-Nguồn: [`Makefile`](../../Makefile), phần `# ---- AWS ----`.
+Nguồn: [`Makefile`](https://github.com/Gaohonggg/GeolifeGPS-trajectory/blob/fargate/Makefile), phần `# ---- AWS ----`.
 
 | Biến | Giá trị | Ghi chú |
 |---|---|---|

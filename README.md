@@ -20,13 +20,11 @@ Từ quỹ đạo GPS của bộ [GeoLife Trajectories 1.3](https://www.microsof
 | `models_tuning/<tên>/v_<k>/` | `config.yaml` (tham số + version dữ liệu) + `tuning.ipynb` (cách chọn từng tham số, chạy trên `dev`) |
 | `results/data_v<n>/<tên>_v<k>/<split>/` | `predictions.csv`, `metrics.json` của một lần chạy |
 | `docs/` | Tài liệu, đọc theo thứ tự bên dưới; `openapi.yaml` là contract của API |
-| `src/geolife_api/` | API theo contract `docs/openapi.yaml`: đọc điểm của user từ Postgres, chạy model version nạp từ MLflow registry trên Databricks (`main` là phần HTTP, `service` là logic, `migrate` / `seed` tạo bảng và nạp dữ liệu) |
-| `db/migrations/` | Schema Postgres, mỗi file một lần thay đổi, chạy theo thứ tự tên |
-| `docker/` | `api.Dockerfile`, `compose.yaml` (Postgres, API) |
-| `scripts/` | `measure_sizing.py`: đo RAM và thời gian của API dưới giới hạn CPU / RAM của một task; `ecs_run.py`: chạy một lệnh của image thành ECS task một lần trên AWS (migrate, seed), in log; `promote.py`: đổi alias `@champion` / `@challenger` trên registry thành model version của hai slot API (`infra/serving/models.auto.tfvars.json`) |
-| `infra/` | Terraform, mỗi thư mục một stack: `bootstrap` (bucket state), `foundation` (mạng, S3, ECR, IAM, ECS cluster, budget), `data` (RDS, task `geolife-ops`), `serving` (ALB, hai slot API blue / green). Tài liệu: [`docs/infra/`](docs/infra/overview.md) |
-| `.env.example` | Biến môi trường ở local (stack docker, token Databricks); `make env` copy thành `.env` (không commit) |
-| `tests/` | `test_parity` (chạy từng user khớp kết quả chạy hàng loạt), `test_mlflow_model`, `test_publish`, `test_promote` (xếp version vào slot), `api/` (HTTP với DB / model giả), `integration/` (với API đang chạy, ở local hoặc trên AWS) |
+| `src/geolife_api/` | API theo contract `docs/openapi.yaml`: đọc điểm của user qua một nguồn điểm (`service.PointStore`), chạy model version nạp từ MLflow registry trên Databricks hoặc bản phát hành trên S3 (`main` là phần HTTP, `service` là logic) |
+| `scripts/` | `promote.py`: đổi alias `@champion` / `@challenger` trên registry thành số model version, phát hành lên S3 version nào chưa có |
+| `infra/` | Terraform, mỗi thư mục một stack: `bootstrap` (bucket state), `foundation` (bucket artifacts, ECR, budget) |
+| `.env.example` | Biến môi trường ở local (token Databricks, MLflow); `make env` copy thành `.env` (không commit) |
+| `tests/` | `test_parity` (chạy từng user khớp kết quả chạy hàng loạt), `test_mlflow_model`, `test_publish`, `api/` (HTTP với nguồn điểm / model giả), `integration/` (với API đang chạy, theo `API_URL`) |
 | `data/` | Không commit. `Geolife_Trajectories/` là dữ liệu gốc; `preprocess/v_<n>/` là output của từng version preprocess |
 
 **Quản lý version:** preprocess và model đều có version riêng, mỗi version là một thư mục có `config.yaml`. Khi đã có kết quả dựa trên một version thì không
@@ -43,8 +41,7 @@ sửa version đó nữa: đổi tham số thì tạo version mới. Config củ
 7. [`docs/confidence.md`](docs/confidence.md): confidence của từng dự đoán home / office (lấy mẫu lại theo tuần), ví dụ cách tính.
 8. [`docs/models/dbscan_v1.md`](docs/models/dbscan_v1.md): model dbscan v1 (DBSCAN trên ô lưới, trọng số thời gian, mỗi cụm là một place; toạ độ ô = tâm hình học), cách chọn từng tham số, kết quả holdout.
 9. [`docs/models/dbscan_v2.md`](docs/models/dbscan_v2.md): model dbscan v2 (toạ độ ô = trung bình có trọng số thời gian của các điểm trong ô), cùng quy trình chọn tham số với dbscan v1.
-10. [`docs/task_sizing.md`](docs/task_sizing.md): RAM và thời gian của API theo số điểm của user và theo cỡ task, dùng để chọn cỡ task khi deploy.
-11. [`docs/infra/overview.md`](docs/infra/overview.md): hạ tầng AWS qua sơ đồ (code chạy ở đâu, các stack Terraform, mạng, luồng phát hành, nạp dữ liệu và phục vụ, blue / green và canary); giá trị cấu hình của từng stack ở [`docs/infra/config_relation.md`](docs/infra/config_relation.md).
+10. [`docs/infra/fargate/`](docs/infra/fargate/overview.md): phương án triển khai bằng ECS Fargate + RDS (code ở nhánh `fargate`): hạ tầng qua sơ đồ, giá trị cấu hình của từng stack ([`config_relation.md`](docs/infra/fargate/config_relation.md)), kiến thức nền ([`knowledges.md`](docs/infra/fargate/knowledges.md)), số đo RAM và thời gian để chọn cỡ task ([`task_sizing.md`](docs/infra/fargate/task_sizing.md)).
 
 ## Chạy lại
 
@@ -71,27 +68,12 @@ uv run python -m geolife.run --model stay_point --version 1 --split holdout
 
 Các notebook EDA chạy từ thư mục `EDA/` theo cùng cách.
 
-## Chạy API ở local
+## Model registry
 
-Cần Docker, `uv` và một workspace Databricks có Unity Catalog (Free Edition đủ dùng). Điền `.env` theo `.env.example`:
-host và personal access token của workspace, đường dẫn experiment, tên model `catalog.schema.model` (schema phải có
-sẵn). Lần đầu (tạo `.env`, lên Postgres, tạo bảng, nạp 182 user, chạy API):
-
-```bash
-make setup
-```
-
-Registry lúc đầu chưa có model: chạy các notebook tuning (phần trên) để đăng ký. Tới lúc đó `/health` báo
-`model_loaded: false`; API tự thử nạp lại model mỗi vài giây nên không cần khởi động lại.
-
-```bash
-curl -X POST "http://localhost:8000/v1/users/5/predictions?start=2008-11-01T00:00:00Z"
-```
-
-- Swagger UI (đúng contract): http://localhost:8000/docs. Run và model xem trên workspace Databricks (Experiments, Catalog).
-- API serve một model version, chọn bằng `MODEL_URI` trong `.env` (`models:/<MLFLOW_MODEL_NAME>/<version>`); đổi xong chạy lại `make api`.
-- `make test`: test nhanh; `make test-all`: thêm test parity trên toàn bộ dữ liệu và test với stack đang chạy.
-- `make down` dừng stack, `make clean` xoá luôn dữ liệu Postgres.
+Cần `uv` và một workspace Databricks có Unity Catalog (Free Edition đủ dùng). Điền `.env` theo `.env.example`
+(`make env`): host và personal access token của workspace, đường dẫn experiment, tên model `catalog.schema.model`
+(schema phải có sẵn). Các notebook tuning đăng ký model vào registry; `make test` chạy test nhanh, `make test-all`
+thêm test parity trên toàn bộ dữ liệu và test với API đang chạy (`API_URL`).
 
 Mọi thuật toán chung một registered model (`MLFLOW_MODEL_NAME`, vd. `workspace.geolife.geolife_home_office`) trong
 Unity Catalog; version của registry là thứ tự đăng

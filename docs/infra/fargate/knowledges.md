@@ -1,5 +1,7 @@
 # Kiến thức nền: Terraform, IAM, S3, SQS, RDS, ALB, ECS
 
+> Trang này mô tả phương án ECS Fargate. Code tương ứng nằm ở nhánh [`fargate`](https://github.com/Gaohonggg/GeolifeGPS-trajectory/tree/fargate); mọi đường dẫn code trong trang là đường dẫn trên nhánh đó.
+
 Tài liệu ghi lại các concept đứng sau hạ tầng của dự án. Mỗi mục theo thứ tự: **là gì → vì sao cần → ví dụ → dự án dùng thế nào**. Giá trị cấu hình cụ thể của từng resource nằm ở [config_relation.md](config_relation.md); kiến trúc tổng thể ở [overview.md](overview.md).
 
 ## Bản đồ liên hệ

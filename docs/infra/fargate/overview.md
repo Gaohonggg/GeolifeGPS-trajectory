@@ -1,6 +1,8 @@
 # Hạ tầng AWS: tổng quan
 
-Trang này vẽ các thành phần và quan hệ giữa chúng. Giá trị cấu hình của từng stack (CIDR, quyền IAM, cỡ RDS, health check…) ở [`config_relation.md`](config_relation.md); số đo RAM / thời gian ở [`../task_sizing.md`](../task_sizing.md); các concept nền (state, IAM role, S3 versioning, SQS, health check, rolling update…) ở [`knowledges.md`](knowledges.md).
+> Trang này mô tả phương án ECS Fargate. Code tương ứng nằm ở nhánh [`fargate`](https://github.com/Gaohonggg/GeolifeGPS-trajectory/tree/fargate); mọi đường dẫn code trong trang là đường dẫn trên nhánh đó.
+
+Trang này vẽ các thành phần và quan hệ giữa chúng. Giá trị cấu hình của từng stack (CIDR, quyền IAM, cỡ RDS, health check…) ở [`config_relation.md`](config_relation.md); số đo RAM / thời gian ở [`../task_sizing.md`](task_sizing.md); các concept nền (state, IAM role, S3 versioning, SQS, health check, rolling update…) ở [`knowledges.md`](knowledges.md).
 
 ## 1. Code nằm đâu, chạy ở đâu
 
@@ -168,7 +170,7 @@ flowchart LR
   tfv -->|"make aws-up<br/>(terraform apply)"| svc["ECS service mỗi slot<br/>MODEL_URI = …/v=N/model"]
 ```
 
-Khi canary lên 100% và alias được chuyển (`@challenger` thành `@champion`), `aws-promote` đổi `live_slot` sang slot đó và dừng slot cũ. Quy tắc đầy đủ ở docstring của [`scripts/promote.py`](../../scripts/promote.py).
+Khi canary lên 100% và alias được chuyển (`@challenger` thành `@champion`), `aws-promote` đổi `live_slot` sang slot đó và dừng slot cũ. Quy tắc đầy đủ ở docstring của [`scripts/promote.py`](https://github.com/Gaohonggg/GeolifeGPS-trajectory/blob/fargate/scripts/promote.py).
 
 ## 7. Lệnh theo vòng đời
 
