@@ -106,7 +106,10 @@ def _same_files(a: dict, b: dict) -> bool:
 
 
 def upload(s3, bucket: str, out: Path) -> tuple[str, dict]:
-    """Upload bản dựng ở `out` lên `s3://bucket/data/serving/v_<n>/`. Trả về ("uploaded" | "already_uploaded", manifest)."""
+    """Upload bản dựng ở `out` lên `s3://bucket/data/serving/v_<n>/`.
+
+    Trả về ("uploaded" | "already_uploaded", manifest).
+    """
     manifest_path = out / MANIFEST
     if not manifest_path.exists():
         raise ExportError(f"{out} chưa có manifest.json; chạy build trước")
