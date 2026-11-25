@@ -7,7 +7,7 @@ info:
   title: GeoLife Home/Office API
   version: 1.0.0
   description: |
-    Suy ra home và office của một user kèm confidence. Client chỉ gửi `userId`; server lấy điểm GPS của user đó trong DB
+    Suy ra home và office của một user kèm confidence. Client chỉ gửi `userId`; server lấy điểm GPS của user đó từ nguồn dữ liệu
     (`POST /users/{userId}/predictions`).
 
     Quy ước:
@@ -45,7 +45,7 @@ security:
 paths:
   /health:
     get:
-      summary: Kiểm tra dịch vụ, model và DB đã sẵn sàng chưa
+      summary: Kiểm tra dịch vụ, model và nguồn dữ liệu đã sẵn sàng chưa
       operationId: getHealth
       security: []
       responses:
@@ -58,9 +58,9 @@ paths:
               example:
                 status: ok
                 model_loaded: true
-                db_connected: true
+                data_available: true
         "503":
-          description: Model chưa nạp xong hoặc mất kết nối DB
+          description: Model chưa nạp xong hoặc không đọc được nguồn dữ liệu
           content:
             application/json:
               schema:
@@ -68,17 +68,17 @@ paths:
               example:
                 status: unavailable
                 model_loaded: true
-                db_connected: false
+                data_available: false
 
   /users/{userId}/predictions:
     post:
-      summary: Chạy model trên dữ liệu GPS của user trong DB
+      summary: Chạy model trên dữ liệu GPS của user
       operationId: predictUser
       description: |
-        Server truy vấn điểm GPS của user trong DB (lọc theo `start`, `end` nếu có), chạy pipeline
+        Server đọc điểm GPS của user (lọc theo `start`, `end` nếu có), chạy pipeline
         (stay -> place -> home / office) và trả kết quả. Request không có body.
         Không truyền khoảng thời gian thì dùng toàn bộ dữ liệu của user. `start` phải trước `end` (nếu không: `400`).
-        User không có trong DB, hoặc không có điểm nào trong khoảng thời gian: `404`. Có điểm nhưng không đủ để dự đoán:
+        User không có trong dữ liệu, hoặc không có điểm nào trong khoảng thời gian: `404`. Có điểm nhưng không đủ để dự đoán:
         `200` kèm abstain.
       parameters:
         - name: userId
@@ -141,14 +141,14 @@ components:
 
     Health:
       type: object
-      required: [status, model_loaded, db_connected]
+      required: [status, model_loaded, data_available]
       properties:
         status:
           type: string
           enum: [ok, unavailable]
         model_loaded:
           type: boolean
-        db_connected:
+        data_available:
           type: boolean
 
     HomeResult:
@@ -254,7 +254,7 @@ components:
               $ref: "#/components/schemas/UserId"
             n_points:
               type: integer
-              description: Số điểm GPS lấy từ DB để chạy model
+              description: Số điểm GPS đọc được để chạy model
             time_range:
               type: object
               description: Thời điểm của điểm đầu và điểm cuối thực sự được dùng
@@ -279,7 +279,7 @@ components:
             code:
               type: string
               enum: [invalid_request, invalid_time_range, unauthorized, forbidden, user_not_found, no_points,
-                     model_unavailable, db_unavailable, internal_error]
+                     model_unavailable, data_unavailable, internal_error]
             message:
               type: string
               description: Mô tả cho người đọc; client chỉ nên rẽ nhánh theo `code`
@@ -317,7 +317,7 @@ components:
           example:
             error: { code: forbidden, message: "account is not allowed to call this API" }
     NotFound:
-      description: User không có trong DB (`user_not_found`), hoặc không có điểm nào trong khoảng thời gian yêu cầu (`no_points`)
+      description: User không có trong dữ liệu (`user_not_found`), hoặc không có điểm nào trong khoảng thời gian yêu cầu (`no_points`)
       content:
         application/json:
           schema:
@@ -330,7 +330,7 @@ components:
               value:
                 error: { code: no_points, message: "user 5 has no points between 2010-01-01T00:00:00Z and 2010-02-01T00:00:00Z" }
     Unavailable:
-      description: Model chưa nạp xong (`model_unavailable`) hoặc mất kết nối DB (`db_unavailable`); thử lại sau
+      description: Model chưa nạp xong (`model_unavailable`) hoặc không đọc được nguồn dữ liệu (`data_unavailable`); thử lại sau
       content:
         application/json:
           schema:
@@ -339,9 +339,9 @@ components:
             modelLoading:
               value:
                 error: { code: model_unavailable, message: "model is loading" }
-            dbDown:
+            dataDown:
               value:
-                error: { code: db_unavailable, message: "database is unavailable" }
+                error: { code: data_unavailable, message: "point data is unavailable" }
     InternalError:
       description: Lỗi không lường trước trong server; không trả chi tiết nội bộ
       content:

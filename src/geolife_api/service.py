@@ -1,6 +1,7 @@
 """Logic endpoint dự đoán, không phụ thuộc HTTP."""
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from typing import Protocol
 
@@ -9,9 +10,15 @@ import pandas as pd
 from .errors import ApiError
 from .model import LoadedModel
 
+log = logging.getLogger(__name__)
+
+
+class DataUnavailable(Exception):
+    """Nguồn điểm không đọc được (mất kết nối, thiếu quyền); khác với user không tồn tại."""
+
 
 class PointStore(Protocol):
-    """Nguồn điểm GPS theo user."""
+    """Nguồn điểm GPS theo user. Lỗi khi đọc nguồn báo bằng `DataUnavailable`."""
 
     def ping(self) -> bool:
         """Nguồn có đọc được không."""
@@ -52,9 +59,13 @@ def predict_user(store: PointStore, model: LoadedModel, user_id: int,
                  start: str | None = None, end: str | None = None) -> dict:
     start, end = parse_time("start", start), parse_time("end", end)
     check_time_range(start, end)
-    if not store.user_exists(user_id):
-        raise ApiError(404, "user_not_found", f"user {user_id} not found")
-    points = store.fetch_points(user_id, start, end)
+    try:
+        if not store.user_exists(user_id):
+            raise ApiError(404, "user_not_found", f"user {user_id} not found")
+        points = store.fetch_points(user_id, start, end)
+    except DataUnavailable:
+        log.exception("point data unavailable for user %s", user_id)
+        raise ApiError(503, "data_unavailable", "point data is unavailable") from None
     if points.empty:
         raise ApiError(404, "no_points", f"user {user_id} has no points between {_bound(start)} and {_bound(end)}")
     return {

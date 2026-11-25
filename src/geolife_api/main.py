@@ -48,8 +48,8 @@ router = APIRouter(prefix="/v1")
 @router.get("/health", response_model=Health)
 def health(request: Request):
     state: State = request.app.state.geolife
-    h = Health(status="ok", model_loaded=state.model is not None, db_connected=state.store.ping())
-    if not (h.model_loaded and h.db_connected):
+    h = Health(status="ok", model_loaded=state.model is not None, data_available=state.store.ping())
+    if not (h.model_loaded and h.data_available):
         h.status = "unavailable"
         return JSONResponse(status_code=503, content=h.model_dump())
     return h

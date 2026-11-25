@@ -108,12 +108,12 @@ def test_model_loading():
         r = c.post("/v1/users/5/predictions")
         h = c.get("/v1/health")
     assert r.status_code == 503 and error_code(r) == "model_unavailable"
-    assert h.status_code == 503 and h.json() == {"status": "unavailable", "model_loaded": False, "db_connected": True}
+    assert h.status_code == 503 and h.json() == {"status": "unavailable", "model_loaded": False, "data_available": True}
 
 
 def test_health():
     with client() as c:
-        assert c.get("/v1/health").json() == {"status": "ok", "model_loaded": True, "db_connected": True}
+        assert c.get("/v1/health").json() == {"status": "ok", "model_loaded": True, "data_available": True}
     with client(store=FakeStore(up=False)) as c:
         assert c.get("/v1/health").status_code == 503
 

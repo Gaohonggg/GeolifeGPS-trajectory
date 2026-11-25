@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class Health(BaseModel):
     status: Literal["ok", "unavailable"]
     model_loaded: bool
-    db_connected: bool
+    data_available: bool
 
 
 class ModelInfo(BaseModel):
