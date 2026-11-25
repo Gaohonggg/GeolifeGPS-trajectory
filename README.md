@@ -20,12 +20,12 @@ Từ quỹ đạo GPS của bộ [GeoLife Trajectories 1.3](https://www.microsof
 | `models_tuning/<tên>/v_<k>/` | `config.yaml` (tham số + version dữ liệu) + `tuning.ipynb` (cách chọn từng tham số, chạy trên `dev`) |
 | `results/data_v<n>/<tên>_v<k>/<split>/` | `predictions.csv`, `metrics.json` của một lần chạy |
 | `docs/` | Tài liệu, đọc theo thứ tự bên dưới; `openapi.yaml` là contract của API |
-| `src/geolife_api/` | API theo contract `docs/openapi.yaml`: đọc điểm của user qua một nguồn điểm (`service.PointStore`), chạy model version nạp từ MLflow registry trên Databricks hoặc bản phát hành trên S3 (`main` là phần HTTP, `service` là logic) |
+| `src/geolife_api/` | API theo contract `docs/openapi.yaml`: đọc điểm của user qua một nguồn điểm (`service.PointStore`, hiện thực là `points.S3PointStore` trên S3 hoặc thư mục local), chạy model version nạp từ MLflow registry trên Databricks hoặc bản phát hành trên S3 (`main` là phần HTTP, `service` là logic). `export_points` dựng điểm theo user cho API và upload lên S3 |
 | `scripts/` | `promote.py`: đổi alias `@champion` / `@challenger` trên registry thành số model version, phát hành lên S3 version nào chưa có |
 | `infra/` | Terraform, mỗi thư mục một stack: `bootstrap` (bucket state), `foundation` (bucket artifacts, ECR, budget) |
 | `.env.example` | Biến môi trường ở local (token Databricks, MLflow); `make env` copy thành `.env` (không commit) |
-| `tests/` | `test_parity` (chạy từng user khớp kết quả chạy hàng loạt), `test_mlflow_model`, `test_publish`, `api/` (HTTP với nguồn điểm / model giả), `integration/` (với API đang chạy, theo `API_URL`) |
-| `data/` | Không commit. `Geolife_Trajectories/` là dữ liệu gốc; `preprocess/v_<n>/` là output của từng version preprocess |
+| `tests/` | `test_parity` (chạy từng user, đọc từ `points.parquet` và từ bản dựng cho API, khớp kết quả chạy hàng loạt), `test_mlflow_model`, `test_publish`, `test_export_points`, `api/` (HTTP với nguồn điểm / model giả; `S3PointStore`), `integration/` (với API đang chạy, theo `API_URL`) |
+| `data/` | Không commit. `Geolife_Trajectories/` là dữ liệu gốc; `preprocess/v_<n>/` là output của từng version preprocess; `serving/v_<n>/` là điểm theo user cho API, dựng từ `preprocess/v_<n>/` |
 
 **Quản lý version:** preprocess và model đều có version riêng, mỗi version là một thư mục có `config.yaml`. Khi đã có kết quả dựa trên một version thì không
 sửa version đó nữa: đổi tham số thì tạo version mới. Config của model ghi `data_version` để biết nó được tuning trên dữ liệu nào.
@@ -42,6 +42,7 @@ sửa version đó nữa: đổi tham số thì tạo version mới. Config củ
 8. [`docs/models/dbscan_v1.md`](docs/models/dbscan_v1.md): model dbscan v1 (DBSCAN trên ô lưới, trọng số thời gian, mỗi cụm là một place; toạ độ ô = tâm hình học), cách chọn từng tham số, kết quả holdout.
 9. [`docs/models/dbscan_v2.md`](docs/models/dbscan_v2.md): model dbscan v2 (toạ độ ô = trung bình có trọng số thời gian của các điểm trong ô), cùng quy trình chọn tham số với dbscan v1.
 10. [`docs/infra/fargate/`](docs/infra/fargate/overview.md): phương án triển khai bằng ECS Fargate + RDS (code ở nhánh `fargate`): hạ tầng qua sơ đồ, giá trị cấu hình của từng stack ([`config_relation.md`](docs/infra/fargate/config_relation.md)), kiến thức nền ([`knowledges.md`](docs/infra/fargate/knowledges.md)), số đo RAM và thời gian để chọn cỡ task ([`task_sizing.md`](docs/infra/fargate/task_sizing.md)).
+11. [`docs/infra/lambda/serving_data.md`](docs/infra/lambda/serving_data.md): phương án AWS Lambda (nhánh `main`), dữ liệu điểm cho API: bố cục mỗi user một file parquet trên S3, cách dựng / upload, cách API đọc, số byte và số GET mỗi request.
 
 ## Chạy lại
 
@@ -83,3 +84,19 @@ ký (hiện tại: 1 = `stay_point` v1, 2 = `stay_point` v2, 3 = `dbscan` v1, 4 
 `src/geolife/models/__init__.py` và có `models_tuning/<tên>/v_<k>/` (notebook kết thúc bằng ô eval + đăng ký như các
 version hiện có).
 
+
+## API ở local
+
+Dựng điểm theo user cho API từ `data/preprocess/v_1/` (ghi vào `data/serving/v_1/`), rồi chạy API ở
+`http://localhost:8000` (`MODEL_URI` và biến Databricks đọc từ `.env`):
+
+```bash
+make serving-points
+```
+
+```bash
+make api
+```
+
+`make aws-export-points` upload bản dựng lên `s3://geolife-<account_id>-artifacts/data/serving/v_1/`; chi tiết ở
+[`docs/infra/lambda/serving_data.md`](docs/infra/lambda/serving_data.md).
