@@ -47,13 +47,32 @@ def version_prefix(model_name: str, version: int) -> str:
     return f"models/{model_name.rsplit('.', 1)[-1]}/v={version}/"
 
 
-def _read_manifest(s3, bucket: str, key: str) -> dict | None:
+def read_manifest(s3, bucket: str, key: str) -> dict | None:
     try:
         return json.loads(s3.get_object(Bucket=bucket, Key=key)["Body"].read())
     except ClientError as e:
         if e.response["Error"]["Code"] in ("NoSuchKey", "404"):
             return None
         raise
+
+
+def put_file(s3, bucket: str, key: str, path: Path, sha: str) -> None:
+    """Upload một file; S3 kiểm SHA-256 phía server và từ chối nếu nội dung tới nơi bị sai."""
+    with path.open("rb") as body:
+        s3.put_object(Bucket=bucket, Key=key, Body=body,
+                      ChecksumSHA256=base64.b64encode(bytes.fromhex(sha)).decode())
+
+
+def put_manifest_once(s3, bucket: str, key: str, manifest: dict) -> bool:
+    """Ghi manifest bằng conditional write. False nếu key đã có (người khác vừa ghi)."""
+    try:
+        s3.put_object(Bucket=bucket, Key=key, IfNoneMatch="*", ContentType="application/json",
+                      Body=json.dumps(manifest, indent=2, ensure_ascii=False).encode())
+    except ClientError as e:
+        if e.response["Error"]["Code"] not in ("PreconditionFailed", "412", "ConditionalRequestConflict"):
+            raise
+        return False
+    return True
 
 
 def _check_same(existing: dict, files: list[dict], uri: str) -> None:
@@ -72,27 +91,20 @@ def publish_dir(s3, bucket: str, prefix: str, model_dir: Path, meta: dict) -> tu
     if not files:
         raise PublishError(f"{model_dir} không có file nào")
 
-    existing = _read_manifest(s3, bucket, prefix + MANIFEST)
+    existing = read_manifest(s3, bucket, prefix + MANIFEST)
     if existing is not None:
         _check_same(existing, files, uri)
         return "already_published", existing
 
-    # file của model trước; S3 kiểm SHA-256 phía server và từ chối nếu nội dung tới nơi bị sai
+    # file của model trước, manifest sau cùng
     for f in files:
-        with (model_dir / f["path"]).open("rb") as body:
-            s3.put_object(Bucket=bucket, Key=f"{prefix}model/{f['path']}", Body=body,
-                          ChecksumSHA256=base64.b64encode(bytes.fromhex(f["sha256"])).decode())
+        put_file(s3, bucket, f"{prefix}model/{f['path']}", model_dir / f["path"], f["sha256"])
 
     manifest = {**meta, "s3_uri": f"{uri}model", "published_at": datetime.now(UTC).isoformat(timespec="seconds"),
                 "files": files}
-    try:
-        s3.put_object(Bucket=bucket, Key=prefix + MANIFEST, IfNoneMatch="*", ContentType="application/json",
-                      Body=json.dumps(manifest, indent=2, ensure_ascii=False).encode())
-    except ClientError as e:
-        if e.response["Error"]["Code"] not in ("PreconditionFailed", "412", "ConditionalRequestConflict"):
-            raise
+    if not put_manifest_once(s3, bucket, prefix + MANIFEST, manifest):
         # người khác vừa phát hành cùng version: chỉ chấp nhận nếu cùng nội dung
-        existing = _read_manifest(s3, bucket, prefix + MANIFEST)
+        existing = read_manifest(s3, bucket, prefix + MANIFEST)
         _check_same(existing, files, uri)
         return "already_published", existing
     return "published", manifest
