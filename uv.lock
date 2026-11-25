@@ -88,6 +88,22 @@ wheels = [
 ]
 
 [[package]]
+name = "awslambdaric"
+version = "4.2.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "simplejson" },
+    { name = "snapshot-restore-py" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/75/af/4e4e9359f856a5ef001d3084455bcfd2f939217f6c4be7e5584e8687080a/awslambdaric-4.2.3.tar.gz", hash = "sha256:b0e687a1b6a0ef7169c19bde57e7b63086b9e66f8a461fb8c38db6810436cb23", size = 4507186, upload-time = "2026-10-27T16:37:41.851Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0f/e2/808eb9a2cd707a79e875c1cba1eea5d0bd89acd6809aee041faf23ba843d/awslambdaric-4.2.3-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:cc6655e16353472567c9e05a4e89c98ffc8199adafd374f707edf222d251d1f3", size = 354744, upload-time = "2026-10-27T16:53:57.673Z" },
+    { url = "https://files.pythonhosted.org/packages/2f/2a/3755263195644f6790efc18396baa59a1661d5e10ee76919c75d80b7ffd5/awslambdaric-4.2.3-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:e8348c991917a6f9415ee2b10c87286141324b1694c23c223464a4089148d6b5", size = 356672, upload-time = "2026-10-27T16:37:23.637Z" },
+    { url = "https://files.pythonhosted.org/packages/30/08/ea5d3e061f71baf3d5163b87ad035be8e2924dce61fb0dca713ea54b6eb2/awslambdaric-4.2.3-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:6eed76022b5e82108f4014b1dbf09fe6be57a4bbad2cd2bb68787aaa260c4e9e", size = 1331503, upload-time = "2026-10-27T16:53:58.962Z" },
+    { url = "https://files.pythonhosted.org/packages/cf/1b/a9a26e305620f53119c545315ab9c3802177242c1de3a0eb0e631535d7d7/awslambdaric-4.2.3-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:41ecfed1e3ea499fe511d483ff8aa78a21393d4b6b1065c3ca7ee9c08d67a707", size = 1386323, upload-time = "2026-10-27T16:37:25.013Z" },
+]
+
+[[package]]
 name = "beautifulsoup4"
 version = "4.15.0"
 source = { registry = "https://pypi.org/simple" }
@@ -514,6 +530,10 @@ dev = [
     { name = "schemathesis" },
     { name = "uvicorn" },
 ]
+lambda = [
+    { name = "awslambdaric" },
+    { name = "mangum" },
+]
 serving = [
     { name = "boto3" },
     { name = "fastapi" },
@@ -555,6 +575,10 @@ dev = [
     { name = "pytest", specifier = ">=9.2.0" },
     { name = "schemathesis", specifier = ">=4.33.2" },
     { name = "uvicorn", specifier = ">=0.38" },
+]
+lambda = [
+    { name = "awslambdaric", specifier = ">=4.2.3" },
+    { name = "mangum", specifier = ">=0.22.0" },
 ]
 serving = [
     { name = "boto3", specifier = ">=1.44.3" },
@@ -1002,6 +1026,18 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/4c/72/22b6449e15bec4cc86c62b659e6c625ab777d01e87aaec717ecef440f87a/llvmlite-0.50.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:d501e5103076b9a14be885d2574dc2f6793171aa54a853d1244e011d476f1399", size = 59696588, upload-time = "2026-09-29T18:43:04.763Z" },
     { url = "https://files.pythonhosted.org/packages/64/70/f395702c20b514363061055b5bdebe3513e544139e6d412a5c86e8ea0b30/llvmlite-0.50.0-cp312-cp312-win_amd64.whl", hash = "sha256:c20595cc3a76e3c85140fdafbf9246c732ddf8e0e646ba2f4e4881f87567300d", size = 41865553, upload-time = "2026-09-29T18:43:08.29Z" },
     { url = "https://files.pythonhosted.org/packages/a6/86/9cde7ac29e183e994dd2d67c998752c66ff6d714ca61837428e1896c3cc9/llvmlite-0.50.0-cp312-cp312-win_arm64.whl", hash = "sha256:4b78a8b669eda09ca1ff4c1a75003023912092974d3e771d1da0777f1b383bdf", size = 37441845, upload-time = "2026-09-29T18:43:12.054Z" },
+]
+
+[[package]]
+name = "mangum"
+version = "0.22.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/82/c8/1579c705908d02a4526a748e8d0f0419151d4498c59033840f5df3a14822/mangum-0.22.0.tar.gz", hash = "sha256:701936891aaed8ed66479b871c2bda87ba288fd01c7d5dd6ba6c8e9ba1c239d1", size = 118290, upload-time = "2026-08-22T12:54:48.396Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ca/a2/21ee5d457ae79a2587ff0d4652990670b7cac84ba0eaab6e6865a3bd2515/mangum-0.22.0-py3-none-any.whl", hash = "sha256:a0595e3cc7a8091b22d8b3997bab5b2ad6aae7a5e40865e19c2015f5c959a93b", size = 17143, upload-time = "2026-08-22T12:54:46.924Z" },
 ]
 
 [[package]]
@@ -1866,6 +1902,29 @@ wheels = [
 ]
 
 [[package]]
+name = "simplejson"
+version = "4.3.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/8c/c1/33e537d655a55e983c247cd794378d8206228621f1420f889f4643315adc/simplejson-4.3.0.tar.gz", hash = "sha256:ffe34ab51a0d37e6d1c661a5672df00d2d5e18804e38eac07abffb83fa5ec3d7", size = 133254, upload-time = "2026-11-10T20:57:37.642Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/97/76/9e69db62288d375779ad079304c20b5435471bdc7732fdb7d2f3b26ad429/simplejson-4.3.0-cp312-cp312-macosx_10_13_universal2.whl", hash = "sha256:5e296777639050bfb159608da7dc54b45465d80aa13588b5599cc062db327ec3", size = 126384, upload-time = "2026-11-10T20:55:14.918Z" },
+    { url = "https://files.pythonhosted.org/packages/85/f1/2ad71ae5d1c141846825e510919e1e3c93f61ff258fd31b28b691df69522/simplejson-4.3.0-cp312-cp312-macosx_10_13_x86_64.whl", hash = "sha256:3c25d28c8dbaaa78b7d2bbd16826e2a4379012d2d36336a3f3ad728ac8afbe60", size = 103951, upload-time = "2026-11-10T20:55:16.162Z" },
+    { url = "https://files.pythonhosted.org/packages/44/49/39414fa25222825ef896de8e22466a15894a59d9466d57f60a363fed217b/simplejson-4.3.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:68688bc6c6bceec938c4e0f2e713b734ee5d0c74a387166ea1f367954a5a31fb", size = 103781, upload-time = "2026-11-10T20:55:17.402Z" },
+    { url = "https://files.pythonhosted.org/packages/c9/e4/da953f0f6202c0f080a6b3e3e906a8bb7eb885615eacff28b9877d5eddf5/simplejson-4.3.0-cp312-cp312-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl", hash = "sha256:ce5726e85a8462580b3c3f5098e9bcaa2d10dfd28233451aad5638a9d16b6d1c", size = 213516, upload-time = "2026-11-10T20:55:18.771Z" },
+    { url = "https://files.pythonhosted.org/packages/9a/a0/dbbb03b7b69b8b2e4f48772d5f5669cf38b380c6f41cad10359841825a65/simplejson-4.3.0-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:213ce37252f42ff591a8e802c634185a37d1fc79a8356afab5b8271343dd6678", size = 211464, upload-time = "2026-11-10T20:55:20.209Z" },
+    { url = "https://files.pythonhosted.org/packages/65/11/6dfffa2ef7065495e90f9b6e595ab20d6bfe351477b1db80da2421b53203/simplejson-4.3.0-cp312-cp312-manylinux2014_ppc64le.manylinux_2_17_ppc64le.manylinux_2_28_ppc64le.whl", hash = "sha256:2a11b3766568f68ac8812d69efebd3f86943033839df8f9b4118632121fa9dcc", size = 219167, upload-time = "2026-11-10T20:55:21.637Z" },
+    { url = "https://files.pythonhosted.org/packages/6a/9f/56cce14e5529c9b2073892ebe0cf412c258403b594b595b8bb6b4eeab63e/simplejson-4.3.0-cp312-cp312-manylinux_2_31_riscv64.manylinux_2_39_riscv64.whl", hash = "sha256:f87895427f71420a89a7e30c1841caf64bc4b3ac446dad6779f108e27871630c", size = 202177, upload-time = "2026-11-10T20:55:23.059Z" },
+    { url = "https://files.pythonhosted.org/packages/df/94/59c2768db0d777da4a30a2f0ff7c40f3db201bbed353d9c9755cfb25c842/simplejson-4.3.0-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:e8dec35d0f0b5392effa503792e513452c45da0e7b2123ab5c8dd302e5a9ecc2", size = 207996, upload-time = "2026-11-10T20:55:24.484Z" },
+    { url = "https://files.pythonhosted.org/packages/36/65/4a3d0f2270736b34aa1ef52a47364043a8aa3692443f8ca104d8866085ed/simplejson-4.3.0-cp312-cp312-musllinux_1_2_ppc64le.whl", hash = "sha256:63c9ccb71fe3c3e82a4fdf4286aa3e93d5715c4631064b34318ed7e65b16073a", size = 216273, upload-time = "2026-11-10T20:55:25.893Z" },
+    { url = "https://files.pythonhosted.org/packages/9c/29/d176fb26b0f25a54a83cbdc168bdf012451b4e9ae8b99750d688c89134af/simplejson-4.3.0-cp312-cp312-musllinux_1_2_riscv64.whl", hash = "sha256:17ff86ff3a5536d32d61d321c16005efa62ba3803baa9a6b6e13da6fd4fa6db2", size = 200008, upload-time = "2026-11-10T20:55:27.292Z" },
+    { url = "https://files.pythonhosted.org/packages/35/1a/79fd898ddcba5042e06603996168d096c60ff52ebb814c0fcae1c0eb3f71/simplejson-4.3.0-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:8c33feae0878de0350a30c89212c58b2c2d027f1efef56d25fed4b036d58e62c", size = 210635, upload-time = "2026-11-10T20:55:28.777Z" },
+    { url = "https://files.pythonhosted.org/packages/eb/ed/7d0108585c92d51e4e09a1f7299df1b4bdb61ee417d71079423c0a9c815a/simplejson-4.3.0-cp312-cp312-win32.whl", hash = "sha256:1acbbbfc6756bcf155cbeb44d6fa7d54ebdd0f155fd624f7acbb5eea067992a1", size = 100604, upload-time = "2026-11-10T20:55:30.171Z" },
+    { url = "https://files.pythonhosted.org/packages/4a/7b/a47f2219d5c7044021094d3cc4488628ee7d66b4a23fe25897fc34467553/simplejson-4.3.0-cp312-cp312-win_amd64.whl", hash = "sha256:57c2a1d1264ad11de34579d52563a6500a22ec582dff9930bb1ac6777dd881c4", size = 102558, upload-time = "2026-11-10T20:55:31.526Z" },
+    { url = "https://files.pythonhosted.org/packages/7f/f0/a3163ee6c27e47c3f8322903f790e23dec4bf96b8a18e0e9c887ef670dda/simplejson-4.3.0-cp312-cp312-win_arm64.whl", hash = "sha256:db1179662393bd11118a881d9879b08d08436e6171d6a48452e26663709e9ec6", size = 103587, upload-time = "2026-11-10T20:55:32.86Z" },
+    { url = "https://files.pythonhosted.org/packages/e7/d0/4e7cb7326ac0fd56d226e61a7a4cdf98b071aded443cfcd730c19f357650/simplejson-4.3.0-py3-none-any.whl", hash = "sha256:48d5d79d723300b49f18bbd88d786c0410cc58b869c121024a132e2e49f9cf35", size = 80711, upload-time = "2026-11-10T20:57:36.379Z" },
+]
+
+[[package]]
 name = "six"
 version = "1.17.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1881,6 +1940,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/1f/ea/49c993d6dfdd7338c9b1000a0f36817ed7ec84577ae2e52f890d1a4ff909/smmap-5.0.3.tar.gz", hash = "sha256:4d9debb8b99007ae47165abc08670bd74cb74b5227dda7f643eccc4e9eb5642c", size = 22506, upload-time = "2026-03-09T03:43:26.1Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c1/d4/59e74daffcb57a07668852eeeb6035af9f32cbfd7a1d2511f17d2fe6a738/smmap-5.0.3-py3-none-any.whl", hash = "sha256:c106e05d5a61449cf6ba9a1e650227ecfb141590d2a98412103ff35d89fc7b2f", size = 24390, upload-time = "2026-03-09T03:43:24.361Z" },
+]
+
+[[package]]
+name = "snapshot-restore-py"
+version = "1.0.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/27/19/2d7584749a7f6d1b4b3a129995b1bc31e70ed9c5ecc323f1ee748b767268/snapshot-restore-py-1.0.0.tar.gz", hash = "sha256:4d27f82fb6f09968f422501e9c3c2dea48a46cd19dc798eb7d6cbc57523c8004", size = 3379, upload-time = "2024-11-13T14:40:22.477Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/10/b8/f9da2457e9dfb5872042202d69b329940527672e20cbfdb26610c09e1d8e/snapshot_restore_py-1.0.0-py3-none-any.whl", hash = "sha256:38f99e696793790f54658e71c68c7a8a40cea877c81232b5052383b1301aceba", size = 3782, upload-time = "2024-11-13T14:40:21.33Z" },
 ]
 
 [[package]]

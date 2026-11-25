@@ -45,10 +45,15 @@ dev = [
     "schemathesis>=4.33.2",
     "uvicorn>=0.38",
 ]
+# Chạy API trên AWS Lambda: runtime interface client và adapter từ event của API Gateway sang ASGI
+lambda = [
+    "awslambdaric>=4.2.3",
+    "mangum>=0.22.0",
+]
 
 [tool.uv]
-# `uv sync` ở máy local cài đủ mọi nhóm; image của API chỉ cài `serving`
-default-groups = ["analysis", "serving", "dev"]
+# `uv sync` ở máy local cài đủ mọi nhóm; image của API chỉ cài `serving` và `lambda`
+default-groups = ["analysis", "serving", "lambda", "dev"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
