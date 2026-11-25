@@ -28,11 +28,25 @@ export AWS_REGION  ?= ap-southeast-1
 # Gán bằng `=` để chỉ gọi aws khi lệnh cần tới.
 # GNU make 3.81 (bản đi kèm macOS) không truyền biến export vào $(shell), nên profile được truyền tường minh.
 AWS_ACCOUNT = $(shell AWS_PROFILE=$(AWS_PROFILE) aws sts get-caller-identity --query Account --output text)
+ECR_HOST    = $(AWS_ACCOUNT).dkr.ecr.$(AWS_REGION).amazonaws.com
+ECR_REPO    = $(ECR_HOST)/geolife-api
+GIT_SHA     = $(shell git rev-parse --short=12 HEAD)
+IMAGE       = geolife-api:$(GIT_SHA)
 
-.PHONY: aws-whoami aws-export-points aws-publish-model aws-promote
+.PHONY: aws-whoami aws-build aws-push aws-export-points aws-publish-model aws-promote
 
 aws-whoami:     ## tài khoản và user đang dùng
 	aws sts get-caller-identity
+
+# Lambda chỉ nhận image một nền tảng: build linux/arm64 (Graviton) thành một manifest, không đính kèm provenance / SBOM.
+aws-build:      ## build image của API, tag theo git SHA
+	docker buildx build --platform linux/arm64 --provenance=false --sbom=false -f docker/api.Dockerfile -t $(IMAGE) --load .
+
+aws-push: aws-build  ## push image lên ECR; từ chối khi còn thay đổi chưa commit (tag phải đúng với code)
+	@test -z "$$(git status --porcelain)" || { echo "còn thay đổi chưa commit: tag $(GIT_SHA) sẽ không đúng với image"; exit 1; }
+	aws ecr get-login-password | docker login --username AWS --password-stdin $(ECR_HOST)
+	docker tag $(IMAGE) $(ECR_REPO):$(GIT_SHA)
+	docker push $(ECR_REPO):$(GIT_SHA)
 
 aws-export-points: serving-points  ## upload data/serving/v_1/ lên S3, manifest ghi sau cùng; đã có thì không ghi gì
 	uv run python -m geolife_api.export_points upload --version 1

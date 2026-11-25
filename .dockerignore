@@ -1,0 +1,7 @@
+# Build context chỉ gồm những gì docker/api.Dockerfile copy; data/ và dữ liệu gốc không được gửi vào builder.
+*
+!pyproject.toml
+!uv.lock
+!src/geolife_api/
+!docs/openapi.yaml
+**/__pycache__
