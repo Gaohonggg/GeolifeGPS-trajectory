@@ -1,9 +1,18 @@
 # Lệnh chạy từ gốc repo.
 
-.PHONY: env test test-all
+.PHONY: env test test-all serving-points api
 
 env:            ## tạo .env lần đầu
 	@test -f .env || cp .env.example .env
+
+serving-points: ## dựng điểm theo user cho API (data/serving/v_1/) từ data/preprocess/v_1/
+	uv run python -m geolife_api.export_points build --version 1
+
+# Mặc định đọc bản dựng ở local; đọc từ S3: make api POINTS_URI=s3://geolife-<account_id>-artifacts/data/serving/v_1
+POINTS_URI ?= $(CURDIR)/data/serving/v_1
+
+api: env        ## chạy API ở local (http://localhost:8000); MODEL_URI và Databricks đọc từ .env
+	POINTS_URI=$(POINTS_URI) uv run --env-file .env uvicorn --factory geolife_api.main:create_app --port 8000
 
 test:           ## test nhanh
 	uv run pytest -m "not slow and not integration"
@@ -20,10 +29,13 @@ export AWS_REGION  ?= ap-southeast-1
 # GNU make 3.81 (bản đi kèm macOS) không truyền biến export vào $(shell), nên profile được truyền tường minh.
 AWS_ACCOUNT = $(shell AWS_PROFILE=$(AWS_PROFILE) aws sts get-caller-identity --query Account --output text)
 
-.PHONY: aws-whoami aws-publish-model aws-promote
+.PHONY: aws-whoami aws-export-points aws-publish-model aws-promote
 
 aws-whoami:     ## tài khoản và user đang dùng
 	aws sts get-caller-identity
+
+aws-export-points: serving-points  ## upload data/serving/v_1/ lên S3, manifest ghi sau cùng; đã có thì không ghi gì
+	uv run python -m geolife_api.export_points upload --version 1
 
 aws-publish-model:  ## sao một version từ registry sang S3 kèm manifest: make aws-publish-model V=4
 	@test -n "$(V)" || { echo "thiếu V, vd. make aws-publish-model V=4"; exit 1; }

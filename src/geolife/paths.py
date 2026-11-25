@@ -13,6 +13,11 @@ def preprocess_dir(version: int) -> Path:
     return DATA / "preprocess" / f"v_{version}"
 
 
+def serving_dir(version: int) -> Path:
+    """Điểm GPS theo user cho API, dựng từ preprocess v_<version>: data/serving/v_<version>/."""
+    return DATA / "serving" / f"v_{version}"
+
+
 def results_dir(data_version: int, run_name: str) -> Path:
     """Kết quả của một lần chạy model trên dữ liệu preprocess `data_version`."""
     return ROOT / "results" / f"data_v{data_version}" / run_name

@@ -1,4 +1,4 @@
-"""FastAPI app: `create_app(store=...)` với một `PointStore`.
+"""FastAPI app: `create_app(store=...)` với một `PointStore` (mặc định `S3PointStore` theo `POINTS_URI`).
 
 Model nạp ở thread nền; trong lúc chưa nạp xong, /v1/health và endpoint dự đoán trả 503.
 """
@@ -16,6 +16,7 @@ from fastapi.responses import JSONResponse
 from . import model as model_lib
 from .config import Settings
 from .errors import ApiError, add_handlers
+from .points import S3PointStore
 from .schemas import Health, UserPrediction
 from .service import PointStore, predict_user
 
@@ -66,9 +67,10 @@ def predict(request: Request, user_id: Annotated[int, Path(ge=0)],
 
 def create_app(store: PointStore | None = None, settings: Settings | None = None,
                state: State | None = None) -> FastAPI:
-    """`state` truyền sẵn (test) thì bỏ qua bước nạp model; nếu không thì cần `store`."""
-    if state is None and store is None:
-        raise ValueError("cần store hoặc state")
+    """`state` truyền sẵn (test) thì bỏ qua bước nạp model; không có `store` thì đọc từ `POINTS_URI`.
+
+    Chạy ở local: `uvicorn --factory geolife_api.main:create_app` (`make api`).
+    """
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -78,7 +80,7 @@ def create_app(store: PointStore | None = None, settings: Settings | None = None
             return
         logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
         s = settings or Settings()
-        st = State(store)
+        st = State(store or S3PointStore(s.points_uri))
         app.state.geolife = st
         threading.Thread(target=_load_model_forever, args=(st, s.model_uri, s.model_retry_s), daemon=True).start()
         yield

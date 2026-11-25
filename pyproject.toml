@@ -43,6 +43,7 @@ dev = [
     "nbformat>=5.11.1",
     "pytest>=9.2.0",
     "schemathesis>=4.33.2",
+    "uvicorn>=0.38",
 ]
 
 [tool.uv]

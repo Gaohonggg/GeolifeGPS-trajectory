@@ -512,6 +512,7 @@ dev = [
     { name = "nbformat" },
     { name = "pytest" },
     { name = "schemathesis" },
+    { name = "uvicorn" },
 ]
 serving = [
     { name = "boto3" },
@@ -553,6 +554,7 @@ dev = [
     { name = "nbformat", specifier = ">=5.11.1" },
     { name = "pytest", specifier = ">=9.2.0" },
     { name = "schemathesis", specifier = ">=4.33.2" },
+    { name = "uvicorn", specifier = ">=0.38" },
 ]
 serving = [
     { name = "boto3", specifier = ">=1.44.3" },
