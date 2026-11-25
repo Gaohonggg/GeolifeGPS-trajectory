@@ -67,17 +67,15 @@ def predict(request: Request, user_id: Annotated[int, Path(ge=0)],
 
 def create_app(store: PointStore | None = None, settings: Settings | None = None,
                state: State | None = None) -> FastAPI:
-    """`state` truyền sẵn (test) thì bỏ qua bước nạp model; không có `store` thì đọc từ `POINTS_URI`.
+    """App với `state` dựng sẵn (Lambda, test), hoặc tự dựng trong lifespan (uvicorn).
 
-    Chạy ở local: `uvicorn --factory geolife_api.main:create_app` (`make api`).
+    - Có `state`: gắn ngay vào app, không cần lifespan (Mangum chạy với `lifespan="off"`).
+    - Không có `state`: lifespan dựng nguồn điểm (`store`, mặc định theo `POINTS_URI`) và nạp model ở thread nền.
+      Chạy ở local: `uvicorn --factory geolife_api.main:create_app` (`make api`).
     """
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        if state is not None:
-            app.state.geolife = state
-            yield
-            return
         logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
         s = settings or Settings()
         st = State(store or S3PointStore(s.points_uri))
@@ -86,7 +84,9 @@ def create_app(store: PointStore | None = None, settings: Settings | None = None
         yield
         st.stop.set()
 
-    app = FastAPI(title="GeoLife Home/Office API", lifespan=lifespan)
+    app = FastAPI(title="GeoLife Home/Office API", lifespan=lifespan if state is None else None)
+    if state is not None:
+        app.state.geolife = state
     app.include_router(router)
     add_handlers(app)
 
