@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import logging
 import math
+import time
 from dataclasses import dataclass
 
+import mlflow.artifacts
 import mlflow.pyfunc
 import numpy as np
 import pandas as pd
@@ -40,18 +42,25 @@ def _role_result(row: pd.Series) -> dict:
 
 
 def load(uri: str) -> LoadedModel:
-    """Tên thuật toán và version config lấy từ metadata của model."""
-    pyfunc = mlflow.pyfunc.load_model(uri)
+    """Tên thuật toán và version config lấy từ metadata của model.
+
+    Ghi thời gian của từng phần (tải, nạp, chạy thử) để đo cold start.
+    """
+    t0 = time.perf_counter()
+    local = mlflow.artifacts.download_artifacts(uri)
+    t1 = time.perf_counter()
+    # nạp: đọc MLmodel, import code thuật toán đi kèm (code_paths), unpickle
+    pyfunc = mlflow.pyfunc.load_model(local)
     meta = pyfunc.metadata.metadata or {}
     model = LoadedModel(ModelInfo(name=meta["algorithm"], version=int(meta["version"])), pyfunc)
-    _warm_up(model)
-    return model
-
-
-def _warm_up(model: LoadedModel) -> None:
-    """Chạy thử một lần để numba biên dịch trước request đầu tiên."""
+    t2 = time.perf_counter()
+    # chạy thử để numba biên dịch trước request đầu tiên
     model.predict(synthetic_points())
-    log.info("model %s v%s warmed up", model.info.name, model.info.version)
+    t3 = time.perf_counter()
+    timings = {"downloadS": round(t1 - t0, 3), "loadS": round(t2 - t1, 3), "warmUpS": round(t3 - t2, 3)}
+    log.info("model %s v%s loaded: download %.2fs, load %.2fs, warm-up %.2fs", model.info.name,
+             model.info.version, *timings.values(), extra=timings)
+    return model
 
 
 def synthetic_points(days: int = 4) -> pd.DataFrame:

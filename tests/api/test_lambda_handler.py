@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
 
 import pytest
 
@@ -89,23 +91,84 @@ def test_cold_start_header_only_on_first_response(handler):
     assert first["x-cold-start"] == "1" and "x-cold-start" not in second
 
 
-def test_init_reads_settings_and_loads_model_once(monkeypatch, tmp_path):
-    loads = []
-
-    def fake_load(uri):
-        loads.append(uri)
-        return FakeModel({})
-
+@pytest.fixture
+def lambda_env(monkeypatch, tmp_path):
+    """Biến môi trường của function; `_handlers` rỗng để mỗi test chạy lại pha init; hạn init tính từ lúc test bắt đầu."""
     monkeypatch.setenv("MODEL_URI", "s3://bucket/models/geolife_home_office/v=1/model")
     monkeypatch.setenv("POINTS_URI", str(tmp_path))
-    monkeypatch.setattr(lambda_handlers.model_lib, "load", fake_load)
+    (tmp_path / "manifest.json").write_text("{}")
     monkeypatch.setattr(lambda_handlers, "_handlers", {})
+    monkeypatch.setattr(lambda_handlers, "_IMPORT_START", time.perf_counter())
+    return monkeypatch
 
+
+def fake_loads(monkeypatch, *outcomes):
+    """Thay model_lib.load: lần gọi thứ i chạy `outcomes[i]` (None: trả model ngay; hàm: chạy rồi trả model)."""
+    calls = []
+    it = iter(outcomes)
+
+    def load(uri):
+        calls.append(uri)
+        outcome = next(it)
+        if outcome is not None:
+            outcome()
+        return FakeModel({"home": PLACE, "office": PLACE})
+
+    monkeypatch.setattr(lambda_handlers.model_lib, "load", load)
+    return calls
+
+
+def fail_after(event: threading.Event):
+    def run():
+        event.wait(5)
+        raise OSError("S3 unavailable")
+    return run
+
+
+def test_init_reads_settings_and_loads_model_once(lambda_env):
+    calls = fake_loads(lambda_env, None)
     h = lambda_handlers.api
     assert lambda_handlers.api is h
-    assert loads == ["s3://bucket/models/geolife_home_office/v=1/model"]
+    assert calls == ["s3://bucket/models/geolife_home_office/v=1/model"]
     status, body, _ = call(h, "GET", "/v1/health")
-    assert status == 503 and body["data_available"] is False     # thư mục trống: chưa có manifest.json
+    assert status == 200 and body["model_loaded"] is True
+
+
+def test_init_ends_at_budget_and_first_request_waits_for_model(lambda_env):
+    lambda_env.setenv("INIT_BUDGET_S", "0.2")
+    release = threading.Event()
+    fake_loads(lambda_env, lambda: release.wait(5))
+
+    t0 = time.perf_counter()
+    h = lambda_handlers.api
+    assert time.perf_counter() - t0 < 1        # pha init không chờ model quá hạn
+    threading.Timer(0.3, release.set).start()   # model nạp xong sau khi init đã kết thúc
+    status, body, headers = call(h, "POST", "/v1/users/5/predictions")
+    assert status == 404 and body["error"]["code"] == "user_not_found"   # request đã tới model/nguồn điểm, không phải 503
+    assert headers["x-cold-start"] == "1"
+
+
+def test_load_failing_during_init_is_retried_before_first_request(lambda_env):
+    done = threading.Event()
+    done.set()
+    calls = fake_loads(lambda_env, fail_after(done), None)   # lỗi ngay, trong hạn của pha init
+    h = lambda_handlers.api
+    status, body, _ = call(h, "GET", "/v1/health")
+    assert status == 200 and body["model_loaded"] is True
+    assert len(calls) == 2
+
+
+def test_load_failing_after_init_answers_503_then_next_request_reloads(lambda_env):
+    lambda_env.setenv("INIT_BUDGET_S", "0.1")
+    fail = threading.Event()
+    calls = fake_loads(lambda_env, fail_after(fail), None)
+    h = lambda_handlers.api
+    fail.set()
+    status, body, _ = call(h, "POST", "/v1/users/5/predictions")
+    assert status == 503 and body["error"]["code"] == "model_unavailable"
+    status, body, _ = call(h, "GET", "/v1/health")
+    assert status == 200 and body["model_loaded"] is True
+    assert len(calls) == 2
 
 
 def test_unknown_attribute():
