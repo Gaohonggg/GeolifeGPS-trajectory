@@ -1,4 +1,4 @@
-# Stack app: function Lambda của API, alias live, HTTP API.
+# Stack app: function Lambda của API, alias live / challenger, HTTP API.
 # Khi không có request thì không thành phần nào tính tiền; stack giữ nguyên giữa các phiên.
 # Model của từng alias nằm trong models.auto.tfvars.json, do make aws-promote ghi.
 # Tên bucket của backend truyền lúc init: make tf-init S=app

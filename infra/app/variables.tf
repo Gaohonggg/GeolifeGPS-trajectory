@@ -18,6 +18,27 @@ variable "live" {
   description = "Alias live: Lambda version nhận traffic và registry version chứa trong nó; lambda_version null: version vừa được đóng"
 }
 
+variable "challenger" {
+  type = object({
+    lambda_version = number
+    model_version  = number
+  })
+  default     = null
+  description = "Alias challenger: Lambda version chứa model của @challenger; null hoặc trùng live: không chia traffic"
+}
+
+# ---- Sửa tay trong canary.auto.tfvars ----
+
+variable "canary_weight" {
+  type        = number
+  default     = 20
+  description = "Phần trăm request của alias live chuyển sang version của challenger; 0: cắt traffic tới version mới"
+  validation {
+    condition     = var.canary_weight >= 0 && var.canary_weight < 100
+    error_message = "canary_weight trong [0, 100): 100% sang challenger là chốt, làm bằng make aws-promote."
+  }
+}
+
 # ---- Ghi bởi make aws-pause / aws-resume vào pause.auto.tfvars (không commit) ----
 
 variable "paused" {

@@ -1,6 +1,6 @@
-# Function API và alias live.
+# Function API, alias live và challenger.
 # publish = true: mỗi lần cấu hình làm việc ($LATEST) đổi image hoặc MODEL_URI, Lambda đóng một version mới, bất biến.
-# Không alias nào trỏ vào $LATEST; alias live trỏ vào version ghi trong models.auto.tfvars.json.
+# Không alias nào trỏ vào $LATEST; hai alias trỏ vào version ghi trong models.auto.tfvars.json.
 
 resource "aws_iam_role" "api" {
   name = "${local.name}-api"
@@ -87,8 +87,39 @@ resource "aws_lambda_function" "api" {
   depends_on = [aws_iam_role_policy.api]
 }
 
+locals {
+  live_version = var.live.lambda_version != null ? tostring(var.live.lambda_version) : aws_lambda_function.api.version
+  # Không có @challenger: alias challenger trùng version của live.
+  challenger_version = var.challenger != null ? tostring(var.challenger.lambda_version) : local.live_version
+  canary             = local.challenger_version != local.live_version && var.canary_weight > 0
+}
+
+# Alias live (API Gateway gọi): khi đang canary, Lambda chia ngẫu nhiên từng lần gọi, canary_weight % sang version của
+# challenger. Metric của Lambda theo alias có dimension ExecutedVersion để tách hai version.
 resource "aws_lambda_alias" "live" {
   name             = "live"
   function_name    = aws_lambda_function.api.function_name
-  function_version = var.live.lambda_version != null ? tostring(var.live.lambda_version) : aws_lambda_function.api.version
+  function_version = local.live_version
+
+  dynamic "routing_config" {
+    for_each = local.canary ? [1] : []
+    content {
+      additional_version_weights = { (local.challenger_version) = var.canary_weight / 100 }
+    }
+  }
+}
+
+# Alias challenger: gọi thẳng version mới, không qua chia traffic của live.
+resource "aws_lambda_alias" "challenger" {
+  name             = "challenger"
+  function_name    = aws_lambda_function.api.function_name
+  function_version = local.challenger_version
+}
+
+# Function URL của alias challenger. AWS_IAM: request phải ký SigV4 bằng credential có quyền
+# lambda:InvokeFunctionUrl trên function (user dev trong cùng tài khoản), nên URL không mở công khai.
+resource "aws_lambda_function_url" "challenger" {
+  function_name      = aws_lambda_function.api.function_name
+  qualifier          = aws_lambda_alias.challenger.name
+  authorization_type = "AWS_IAM"
 }

@@ -65,7 +65,7 @@ API_URL  = $(shell AWS_PROFILE=$(AWS_PROFILE) $(APP) output -raw url 2>/dev/null
 SMOKE_USER ?= 83
 PAUSE_VARS = infra/app/pause.auto.tfvars
 
-aws-deploy:     ## terraform apply stack app theo tfvars hiện có (image mới, đổi cấu hình)
+aws-deploy:     ## terraform apply stack app theo tfvars hiện có (image mới, đổi cấu hình, đổi canary_weight)
 	$(APP) apply
 
 aws-url:        ## URL của HTTP API
