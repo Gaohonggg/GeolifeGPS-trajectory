@@ -10,7 +10,7 @@ import httpx
 import numpy as np
 import pytest
 import schemathesis
-from schemathesis.specs.openapi.checks import ignored_auth, positive_data_acceptance
+from schemathesis.specs.openapi.checks import ignored_auth, positive_data_acceptance, unsupported_method
 
 from geolife.paths import ROOT
 
@@ -42,6 +42,10 @@ def test_contract(case):
     if response.status_code == 400 and response.json()["error"]["code"] == "invalid_time_range":
         # start >= end hợp lệ theo schema (OpenAPI không diễn tả được ràng buộc giữa hai tham số) nhưng spec yêu cầu 400
         excluded.append(positive_data_acceptance)
+    content_type = response.headers.get("content-type", [""])[0]   # schemathesis: tên header → danh sách giá trị
+    if case.method.upper() == "TRACE" and not content_type.startswith("application/json"):
+        # API Gateway (HTTP API) tự trả 405 cho TRACE, không chuyển tới app, nên response thiếu header Allow
+        excluded.append(unsupported_method)
     case.validate_response(response, excluded_checks=excluded)
 
 
