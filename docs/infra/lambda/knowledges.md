@@ -338,7 +338,9 @@ Request đầu tiên:                                                           
 
 **Chọn hạn 8,5 giây.** Hạn tính từ lúc import module handler. Cộng khoảng 0,3 giây trước đó (khởi động Python, `awslambdaric`) là khoảng 8,8 giây, còn dư hơn 1 giây so với trần cho dao động giữa các lần init. Hạn đặt qua biến môi trường `INIT_BUDGET_S`.
 
-**Giới hạn.** Cách này không làm cold start ngắn hơn tổng thời gian init (vẫn khoảng 10 giây); nó chỉ loại bỏ trường hợp init hai lần (17–18 giây, hoặc 503).
+**Kết quả đo** ([sizing.md](sizing.md) L8): 10 environment mới, không init nào quá trần, kể cả lần đầu Lambda chạy image vừa push. `initDurationMs` 8,45–8,88 giây; request đầu chờ model thêm 0,45–3,2 giây; client chờ 9–13 giây thay vì 17–18 giây.
+
+**Giới hạn.** Cách này không làm cold start ngắn hơn tổng thời gian import và nạp model (khoảng 10 giây); nó chỉ loại bỏ trường hợp init hai lần. Muốn ngắn hơn thì xem mục 14.
 
 **Dự án dùng thế nào.** `ModelLoader` và `_init()` trong [`src/geolife_api/lambda_handlers.py`](../../../src/geolife_api/lambda_handlers.py); test ở [`tests/api/test_lambda_handler.py`](../../../tests/api/test_lambda_handler.py) cho ba trường hợp trên. Log của handler có `modelReady` (model xong trong hạn hay chưa) và `modelWaitS` (request đầu chờ bao lâu).
 

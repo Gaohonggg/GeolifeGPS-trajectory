@@ -194,6 +194,52 @@ So với Fargate 0,5 vCPU + RDS (`docs/infra/fargate/task_sizing.md`, B5 sau khi
 - RAM của user 153 trên Lambda (1,5 GB) cao hơn mức ổn định đo ở local (1,4 GB, L2) khoảng 100 MB.
 - User lớn nhất nhanh hơn Fargate + RDS khoảng 3 lần: đọc 61 MB parquet từ S3 thay cho nhận 173 MB CSV từ RDS (9,7–10,8 giây). User trung vị chậm hơn khoảng 0,15 giây vì thêm một chặng API Gateway → Lambda.
 
+## L8. Pha init có hạn giờ
+
+Đo ngày 2026-11-26, Lambda version 6, 2 048 MB, image `8a31e3ba7ab2`: model nạp ở thread nền, pha init chờ model tối đa 8,5 giây kể từ lúc import handler, request đầu chờ phần còn lại ([`request_flow.md`](request_flow.md), bước 3). Cùng `stay_point` v1 (registry v1) và script như L6.
+
+```bash
+uv run python scripts/measure_lambda_latency.py --url $(make -s aws-url) --cold 6 --repeat 0
+uv run python scripts/measure_lambda_latency.py --url $(make -s aws-url) --cold 12 --repeat 0
+uv run python scripts/measure_lambda_latency.py --url $(make -s aws-url) --cold 0
+```
+
+- Đợt 1 chạy ngay sau khi `live` chuyển sang version 6, lần đầu Lambda chạy image này. Đây là trường hợp lần deploy đầu ở L6 bị `503`.
+- Đợt 2 gửi 12 request đồng thời khi đã có 6 environment, nên Lambda phải dựng thêm environment; image đã được đọc một lần.
+
+**Xét:** pha init và request đầu tiên của environment mới (giây).
+
+| | Đợt 1: image mới | Đợt 2: image đã đọc |
+| --- | --- | --- |
+| Environment mới | 6 | 4 |
+| Init quá trần 10 giây | 0 | 0 |
+| `initDurationMs` | 8,75–8,88 | 8,45–8,80 |
+| Pha init theo log của handler (từ lúc import) | 8,50–8,51 | 8,16–8,51 |
+| Pha init kết thúc khi model chưa nạp xong | 6/6 | 3/4 |
+| Request đầu chờ model | 0,45–3,22 | 0,78–1,04 |
+| Import `geolife_api` | 2,97–4,13 | 2,61–3,17 |
+| Tải model từ S3 | 1,07–1,24 | 1,06–1,22 |
+| Nạp model | 4,11–5,33 | 3,70–4,22 |
+| Chạy thử | 0,76–1,02 | 0,79–0,99 |
+| Thời gian phía client của request đầu (user 83) | 10,1–12,9 | 9,2–10,6 |
+
+Ở đợt 2, 2 trên 12 request nhận `503` sau 0,2 giây: 6 environment cũ cộng 4 environment mới chạm trần reserved concurrency 10, Lambda từ chối request còn lại mà không chạy code. 6 request còn lại dùng environment đã ấm (0,2–0,5 giây).
+
+**Xét:** environment đã ấm, như L7 (2 048 MB).
+
+| User | Client (s) | Lambda `durationMs` (s) | RAM tối đa (MB) |
+| --- | --- | --- | --- |
+| 83 | 0,39–0,46 (trung vị 0,41) | 0,22–0,30 | 658–664 |
+| 14 | 0,88–0,90 (trung vị 0,89) | 0,67–0,87 | 788–809 |
+| 153 | 4,38–4,47 (trung vị 4,42) | 4,16–4,62 | 1 396–1 504 |
+
+**Output cho thấy:**
+
+- Không init nào quá trần, kể cả lần đầu Lambda chạy image mới: cold start là 9–13 giây thay vì 17–18 giây (L6) hay `503` (lần deploy đầu).
+- Ở lần đầu chạy image, tải + nạp + chạy thử mất 6–7,5 giây sau import 3–4 giây, tức pha init tuần tự sẽ là 10–12 giây: quá trần ở phần lớn environment. Hạn 8,5 giây chuyển 0,5–3,2 giây đó sang request đầu.
+- `initDurationMs` (8,45–8,88 giây) dư hơn 1 giây so với trần.
+- Request khi đã ấm không đổi so với L7: thread nạp model không còn chạy khi environment đã phục vụ xong request đầu.
+
 ## Kết luận
 
 | | |
@@ -201,6 +247,6 @@ So với Fargate 0,5 vCPU + RDS (`docs/infra/fargate/task_sizing.md`, B5 sau khi
 | **RAM của function API** | **2 048 MB** (≈ 1,15 vCPU) |
 | Lý do | Request lớn nhất dùng tới 1,5 GB trên Lambda (L7). 2 048 MB dư hơn 500 MB; 1 769 MB chỉ dư khoảng 250 MB, cùng cỡ với dao động giữa các lần đo (L1, L2) |
 | Không chọn cao hơn | 3 008 MB không làm request nhanh hơn (L7) và không đưa pha init ra xa trần 10 giây (L6), nhưng tăng chi phí theo GB-giây khoảng 47% |
-| Cold start | Pha init 7–10 giây ở mọi mức RAM, sát trần 10 giây; init quá trần thì request đầu chờ 17–18 giây (L6) |
+| Cold start | Import và nạp model mất 7–12 giây ở mọi mức RAM, sát hoặc quá trần 10 giây của pha init (L6, L8). Pha init dừng chờ model ở 8,5 giây, nên không còn init quá trần; request đầu của environment mới chờ 9–13 giây (L8) |
 
 **⇒ Quy tắc ước lượng:** RAM đỉnh ≈ 280 MB + 0,5 KB × số điểm của request, cộng 200–300 MB khi environment đã xử lý nhiều request lớn.
