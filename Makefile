@@ -34,7 +34,7 @@ GIT_SHA     = $(shell git rev-parse --short=12 HEAD)
 IMAGE       = geolife-api:$(GIT_SHA)
 
 .PHONY: aws-whoami aws-build aws-push aws-export-points aws-publish-model aws-promote aws-deploy aws-url aws-smoke \
-	aws-pause aws-resume
+	aws-pause aws-resume aws-call-challenger aws-canary-check
 
 aws-whoami:     ## tài khoản và user đang dùng
 	aws sts get-caller-identity
@@ -82,6 +82,21 @@ aws-smoke:      ## gọi các endpoint qua HTTP API, kiểm mã trả về
 	expect 400 -X POST "$(API_URL)/v1/users/$(SMOKE_USER)/predictions?start=hom-qua"; \
 	expect 404 $(API_URL)/khong-co; \
 	exit $$fail
+
+# Function URL của alias challenger dùng AWS_IAM: ký SigV4 bằng credential của profile đang dùng.
+# Credential tạm (SSO, assume role) cần thêm header x-amz-security-token.
+M ?= POST
+aws-call-challenger:  ## gọi thẳng version của @challenger, không qua chia traffic: make aws-call-challenger P=/v1/users/5/predictions [M=GET]
+	@test -n "$(P)" || { echo "thiếu P, vd. make aws-call-challenger P=/v1/users/5/predictions"; exit 1; }
+	@eval "$$(aws configure export-credentials --format env)"; \
+	curl -sS -i -X $(M) --max-time 60 --aws-sigv4 "aws:amz:$(AWS_REGION):lambda" \
+		--user "$$AWS_ACCESS_KEY_ID:$$AWS_SECRET_ACCESS_KEY" \
+		$${AWS_SESSION_TOKEN:+-H "x-amz-security-token: $$AWS_SESSION_TOKEN"} \
+		"$$($(APP) output -raw challenger_url)$(P)"; echo
+
+N ?= 100
+aws-canary-check:  ## N request tuần tự qua HTTP API: tỉ lệ, 5xx, latency khi ấm theo Lambda version (N=100)
+	uv run python scripts/canary_check.py -n $(N)
 
 # Đặt reserved concurrency về 0 bằng aws CLI để có hiệu lực ngay, không qua terraform plan;
 # ghi paused vào tfvars để make aws-deploy sau đó không bật lại.
