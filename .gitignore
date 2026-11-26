@@ -20,3 +20,5 @@ geolife-admin_credentials.csv
 *.tfstate.*
 *.tfplan
 infra/**/terraform.tfvars
+# trạng thái tạm dừng của stack app, ghi bởi make aws-pause / aws-resume
+infra/app/pause.auto.tfvars

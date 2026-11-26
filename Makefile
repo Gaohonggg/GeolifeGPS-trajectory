@@ -33,7 +33,8 @@ ECR_REPO    = $(ECR_HOST)/geolife-api
 GIT_SHA     = $(shell git rev-parse --short=12 HEAD)
 IMAGE       = geolife-api:$(GIT_SHA)
 
-.PHONY: aws-whoami aws-build aws-push aws-export-points aws-publish-model aws-promote
+.PHONY: aws-whoami aws-build aws-push aws-export-points aws-publish-model aws-promote aws-deploy aws-url aws-smoke \
+	aws-pause aws-resume
 
 aws-whoami:     ## tài khoản và user đang dùng
 	aws sts get-caller-identity
@@ -55,8 +56,43 @@ aws-publish-model:  ## sao một version từ registry sang S3 kèm manifest: ma
 	@test -n "$(V)" || { echo "thiếu V, vd. make aws-publish-model V=4"; exit 1; }
 	uv run python -m geolife.publish --version $(V)
 
-aws-promote:    ## đọc @champion / @challenger, phát hành lên S3 version nào chưa có (ARGS=--champion-only)
+aws-promote:    ## alias live theo @champion: phát hành lên S3, đóng Lambda version nếu thiếu, apply stack app
 	uv run python scripts/promote.py $(ARGS)
+
+# ---- Stack app: function Lambda + HTTP API; không tính tiền khi không có request nên không phải huỷ sau mỗi phiên ----
+APP      = terraform -chdir=infra/app
+API_URL  = $(shell AWS_PROFILE=$(AWS_PROFILE) $(APP) output -raw url 2>/dev/null)
+SMOKE_USER ?= 83
+PAUSE_VARS = infra/app/pause.auto.tfvars
+
+aws-deploy:     ## terraform apply stack app theo tfvars hiện có (image mới, đổi cấu hình)
+	$(APP) apply
+
+aws-url:        ## URL của HTTP API
+	@echo $(API_URL)
+
+aws-smoke:      ## gọi các endpoint qua HTTP API, kiểm mã trả về
+	@test -n "$(API_URL)" || { echo "stack app chưa có (make aws-promote)"; exit 1; }
+	@fail=0; \
+	expect() { want=$$1; shift; code=$$(curl -s -o /dev/null -w '%{http_code}' --max-time 60 "$$@"); \
+		if [ "$$code" = "$$want" ]; then echo "ok   $$code $$*"; else echo "FAIL $$code (cần $$want) $$*"; fail=1; fi; }; \
+	expect 200 $(API_URL)/v1/health; \
+	expect 200 -X POST $(API_URL)/v1/users/$(SMOKE_USER)/predictions; \
+	expect 404 -X POST $(API_URL)/v1/users/999999/predictions; \
+	expect 400 -X POST "$(API_URL)/v1/users/$(SMOKE_USER)/predictions?start=hom-qua"; \
+	expect 404 $(API_URL)/khong-co; \
+	exit $$fail
+
+# Đặt reserved concurrency về 0 bằng aws CLI để có hiệu lực ngay, không qua terraform plan;
+# ghi paused vào tfvars để make aws-deploy sau đó không bật lại.
+aws-pause:      ## chặn mọi request: reserved concurrency của function về 0
+	echo 'paused = true' > $(PAUSE_VARS)
+	aws lambda put-function-concurrency --function-name geolife-api --reserved-concurrent-executions 0
+
+aws-resume:     ## bật lại sau aws-pause
+	echo 'paused = false' > $(PAUSE_VARS)
+	aws lambda put-function-concurrency --function-name geolife-api \
+		--reserved-concurrent-executions $$($(APP) output -raw api_reserved_concurrency)
 
 # ---- Terraform: make tf-<lệnh> S=<stack>, vd. make tf-plan S=foundation ----
 # bootstrap giữ state ở local; các stack khác lưu state trong bucket do bootstrap tạo.
