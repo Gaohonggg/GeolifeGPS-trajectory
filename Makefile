@@ -56,7 +56,7 @@ aws-publish-model:  ## sao một version từ registry sang S3 kèm manifest: ma
 	@test -n "$(V)" || { echo "thiếu V, vd. make aws-publish-model V=4"; exit 1; }
 	uv run python -m geolife.publish --version $(V)
 
-aws-promote:    ## alias live theo @champion: phát hành lên S3, đóng Lambda version nếu thiếu, apply stack app
+aws-promote:    ## live theo @champion, challenger theo @challenger: phát hành lên S3, đóng Lambda version nếu thiếu, apply stack app
 	uv run python scripts/promote.py $(ARGS)
 
 # ---- Stack app: function Lambda + HTTP API; không tính tiền khi không có request nên không phải huỷ sau mỗi phiên ----

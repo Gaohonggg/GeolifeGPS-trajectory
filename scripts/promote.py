@@ -1,16 +1,24 @@
-"""Đưa alias trên registry ra function Lambda: alias live chạy model của @champion.
+"""Đưa alias trên registry ra function Lambda: alias live chạy model của @champion, alias challenger chạy model
+của @challenger, live chia `canary_weight` % request sang challenger.
 
     uv run python scripts/promote.py [--champion-only] [--auto-approve]
 
-1. Đổi @champion / @challenger thành số version; version nào chưa có bản phát hành trên S3 thì phát hành (geolife.publish).
-2. `terraform apply` để cấu hình làm việc ($LATEST) theo code và cấu hình hiện tại (image mới nhất trong ECR, RAM,
-   timeout…); cấu hình đổi thì Lambda đóng một version mới.
-3. Tìm Lambda version có cùng cấu hình với $LATEST (trừ MODEL_URI) và chứa model của @champion, theo thứ tự:
-   version đang gắn alias live → version mới nhất. Không có thì đóng version mới: đặt model của $LATEST là @champion
-   trong `infra/app/models.auto.tfvars.json`, `terraform apply`, đọc số version vừa đóng.
-4. Ghi version đó vào `live` trong tfvars và `terraform apply` để alias live trỏ vào nó.
+Function là một kệ; mỗi Lambda version là một hộp đã đóng, chứa một image và một registry version, không sửa được
+và không bị xoá. Alias live / challenger là nhãn dán lên hộp.
 
-Lambda version bất biến và không bị xoá, nên version cũ được dùng lại khi rollback mà không phải đóng mới.
+1. Đổi @champion / @challenger thành số version (không có @champion thì dừng, AWS giữ nguyên); version nào chưa có
+   bản phát hành trên S3 thì phát hành (geolife.publish).
+2. `terraform apply` để cấu hình làm việc ($LATEST) theo code và cấu hình hiện tại (image mới nhất trong ECR, RAM,
+   timeout…); cấu hình đổi thì Lambda đóng một hộp mới.
+3. Nhãn live: tìm hộp có cùng cấu hình với $LATEST (trừ MODEL_URI) và chứa model của @champion, theo thứ tự: hộp
+   đang dán live → hộp đang dán challenger → hộp mới nhất còn lại. Không có thì đóng hộp mới: đặt model của
+   $LATEST trong `infra/app/models.auto.tfvars.json`, `terraform apply`, đọc số version vừa đóng.
+4. Nhãn challenger: không có @challenger hoặc @challenger trùng @champion thì dán lên hộp của live (live nhận 100%);
+   có thì tìm hoặc đóng hộp như bước 3.
+5. Ghi hai nhãn vào tfvars và `terraform apply`. Tỉ lệ chia (`canary_weight`) nằm trong `canary.auto.tfvars`,
+   promote không sửa.
+
+Hộp cũ được dùng lại khi rollback hay huỷ canary mà không phải đóng mới, miễn là cùng image hiện tại.
 """
 from __future__ import annotations
 
@@ -18,6 +26,7 @@ import argparse
 import json
 import os
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import boto3
@@ -41,12 +50,26 @@ class Box:
     model_uri: str
 
 
+@dataclass(frozen=True)
+class Labels:
+    """Lambda version mà mỗi nhãn dán lên. `challenger == live`: không chia traffic."""
+    live: int
+    challenger: int
+
+
 def alias_version(client: MlflowClient, model_name: str, alias: str) -> int | None:
     """Số version mà alias đang trỏ tới; None nếu alias chưa được gắn."""
     try:
         return int(client.get_model_version_by_alias(model_name, alias).version)
     except MlflowException:
         return None
+
+
+def registry_targets(champion: int | None, challenger: int | None) -> tuple[int, int | None]:
+    """Registry version cho hai nhãn. Không có @champion thì dừng; @challenger trùng @champion coi như không có."""
+    if champion is None:
+        raise SystemExit("registry chưa có alias @champion; AWS giữ nguyên")
+    return champion, (None if challenger == champion else challenger)
 
 
 def ensure_published(model_name: str, version: int, bucket: str, s3) -> None:
@@ -75,6 +98,26 @@ def find_box(boxes: list[Box], config: str, uri: str, prefer: list[int | None]) 
         if v in matches:
             return v
     return max(matches, default=None)
+
+
+def assign_labels(champion: int, challenger: int | None, current: Labels | None,
+                  find: Callable[[int, list[int | None]], int | None], close: Callable[[int], int]) -> Labels:
+    """Chọn hộp cho hai nhãn. `find(model_version, prefer)` tìm hộp cùng image hiện tại chứa model đó;
+    `close(model_version)` đóng hộp mới và trả số version. Hộp của live chọn trước, nên khi phải đóng hai hộp
+    thì hộp của @champion có số nhỏ hơn."""
+    prefer = [current.live, current.challenger] if current else []
+
+    def box_for(version: int) -> int:
+        box = find(version, prefer)
+        if box is None:
+            box = close(version)
+            print(f"đã đóng Lambda version {box} (registry v{version})")
+        else:
+            print(f"dùng lại Lambda version {box} (registry v{version})")
+        return box
+
+    live = box_for(champion)
+    return Labels(live, live if challenger is None else box_for(challenger))
 
 
 def describe(lam, qualifier: str) -> Box:
@@ -112,6 +155,14 @@ def write_tfvars(tfvars: dict) -> None:
     TFVARS.write_text(json.dumps(tfvars, indent=2) + "\n")
 
 
+def current_labels(tfvars: dict) -> Labels | None:
+    live = tfvars.get("live", {}).get("lambda_version")
+    if live is None:
+        return None
+    challenger = (tfvars.get("challenger") or {}).get("lambda_version", live)
+    return Labels(live, challenger)
+
+
 def terraform(*args: str, capture: bool = False) -> str:
     out = subprocess.run(["terraform", f"-chdir={APP_DIR}", *args], check=True, text=True,
                          stdout=subprocess.PIPE if capture else None)
@@ -124,7 +175,7 @@ def apply(auto_approve: bool) -> None:
 
 def main(argv=None):
     ap = argparse.ArgumentParser()
-    ap.add_argument("--champion-only", action="store_true", help="bỏ qua @challenger")
+    ap.add_argument("--champion-only", action="store_true", help="bỏ qua @challenger: live nhận 100%%")
     ap.add_argument("--auto-approve", action="store_true", help="terraform apply không hỏi lại")
     a = ap.parse_args(argv)
 
@@ -132,10 +183,9 @@ def main(argv=None):
     env("MLFLOW_REGISTRY_URI")
     model_name = env("MLFLOW_MODEL_NAME")
     client = MlflowClient()
-    champion = alias_version(client, model_name, "champion")
-    if champion is None:
-        raise SystemExit(f"{model_name} chưa có alias @champion; AWS giữ nguyên")
-    challenger = None if a.champion_only else alias_version(client, model_name, "challenger")
+    champion, challenger = registry_targets(
+        alias_version(client, model_name, "champion"),
+        None if a.champion_only else alias_version(client, model_name, "challenger"))
     print(f"@champion = v{champion}, @challenger = {f'v{challenger}' if challenger else '-'}")
 
     session = boto3.Session(region_name=os.environ.get("AWS_REGION"))
@@ -144,7 +194,6 @@ def main(argv=None):
     for v in {champion, challenger} - {None}:
         ensure_published(model_name, v, bucket, s3)
 
-    uri = model_uri(bucket, model_name, champion)
     tfvars = read_tfvars()
     if not tfvars:
         # Lần deploy đầu, function chưa có: đóng version đầu tiên với model của @champion.
@@ -152,28 +201,42 @@ def main(argv=None):
         tfvars = {"latest_model_version": champion, "live": {"lambda_version": None, "model_version": champion}}
         write_tfvars(tfvars)
         apply(a.auto_approve)
-        box = int(terraform("output", "-raw", "published_version", capture=True))
-        print(f"đã đóng Lambda version {box}")
-    else:
-        apply(a.auto_approve)
-        lam = session.client("lambda")
-        latest = describe(lam, "$LATEST")
-        box = find_box(list_boxes(lam), latest.config, uri, prefer=[tfvars["live"].get("lambda_version")])
-        if box is None:
-            print(f"chưa có Lambda version chứa v{champion} với cấu hình hiện tại, đóng version mới")
-            # Alias live giữ version cũ trong lúc đóng.
-            tfvars["latest_model_version"] = champion
-            write_tfvars(tfvars)
-            apply(a.auto_approve)
-            box = int(terraform("output", "-raw", "published_version", capture=True))
-            print(f"đã đóng Lambda version {box}")
-        else:
-            print(f"dùng lại Lambda version {box}")
+        tfvars["live"]["lambda_version"] = int(terraform("output", "-raw", "published_version", capture=True))
+        write_tfvars(tfvars)
+    apply(a.auto_approve)
 
-    tfvars["live"] = {"lambda_version": box, "model_version": champion}
+    lam = session.client("lambda")
+    latest_config = describe(lam, "$LATEST").config
+    boxes = list_boxes(lam)
+
+    def find(version: int, prefer: list[int | None]) -> int | None:
+        return find_box(boxes, latest_config, model_uri(bucket, model_name, version), prefer)
+
+    def close(version: int) -> int:
+        if tfvars["latest_model_version"] == version:
+            # $LATEST đã chứa model này với cấu hình hiện tại mà không có hộp nào khớp: Lambda không đóng thêm
+            # khi cấu hình không đổi, nên không có cách đóng hộp ở đây.
+            raise SystemExit(f"$LATEST đã chứa v{version} nhưng không có Lambda version nào khớp; kiểm tra function")
+        # Hai nhãn giữ hộp cũ trong lúc đóng.
+        tfvars["latest_model_version"] = version
+        write_tfvars(tfvars)
+        apply(a.auto_approve)
+        box = int(terraform("output", "-raw", "published_version", capture=True))
+        boxes.append(describe(lam, str(box)))
+        return box
+
+    labels = assign_labels(champion, challenger, current_labels(tfvars), find, close)
+
+    tfvars["live"] = {"lambda_version": labels.live, "model_version": champion}
+    tfvars["challenger"] = {"lambda_version": labels.challenger,
+                            "model_version": champion if challenger is None else challenger}
     write_tfvars(tfvars)
     apply(a.auto_approve)
-    print(f"live → Lambda version {box} (registry v{champion})")
+    if labels.challenger == labels.live:
+        print(f"live → Lambda version {labels.live} (registry v{champion}) 100%; challenger trùng live")
+    else:
+        print(f"live → Lambda version {labels.live} (registry v{champion}), chia canary_weight % sang "
+              f"challenger → Lambda version {labels.challenger} (registry v{challenger})")
 
 
 if __name__ == "__main__":
