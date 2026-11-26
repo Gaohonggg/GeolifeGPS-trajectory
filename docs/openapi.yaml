@@ -36,8 +36,8 @@ info:
     đếm tỉ lệ lần chọn ra cùng place. User ít tuần dữ liệu cho confidence dao động mạnh; đọc kèm `days` và `regularity`.
 
 servers:
-  - url: http://localhost:8000/v1
-    description: Version của API nằm trong đường dẫn; đổi contract không tương thích thì lên /v2
+  - url: /v1
+    description: Đường dẫn tương đối, Swagger UI gọi tới host của trang đang mở (local hoặc HTTP API trên AWS). Version của API nằm trong đường dẫn; đổi contract không tương thích thì lên /v2
 
 security:
   - googleOidc: []
