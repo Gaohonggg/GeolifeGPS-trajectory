@@ -104,13 +104,18 @@ Lambda khởi động container từ image trong ECR, đặt biến môi trườ
 ENTRYPOINT: python -m awslambdaric geolife_api.lambda_handlers.api
   awslambdaric import geolife_api.lambda_handlers rồi lấy thuộc tính `api` → lambda_handlers._init():
     1. Settings() đọc MODEL_URI, POINTS_URI
-    2. model.load(MODEL_URI): tải thư mục MLflow model từ S3, chạy thử một lần (numba biên dịch)
-    3. S3PointStore(POINTS_URI): tạo boto3 client
-    4. create_app(state=State(store, model)): app FastAPI với model và nguồn điểm dựng sẵn
-    5. Mangum(app, lifespan="off") bọc trong handler
+    2. ModelLoader(MODEL_URI) mở thread nền: tải thư mục MLflow model từ S3, nạp, chạy thử một lần (numba biên dịch)
+    3. Trong lúc đó, ở luồng chính: S3PointStore(POINTS_URI) tạo boto3 client;
+       create_app(state=State(store)) dựng app FastAPI; Mangum(app, lifespan="off") bọc trong handler
+    4. Chờ thread nạp model tới INIT_BUDGET_S = 8,5 giây kể từ lúc import module, rồi kết thúc pha init
+       (model xong thì gắn vào State; chưa xong thì request đầu tiên chờ phần còn lại)
 ```
 
-Pha init chạy **một lần cho mỗi environment**; model ở lại trong RAM cho mọi request sau của environment đó. Init lỗi (vd. không tải được model) thì Lambda báo lỗi init và thử lại ở request sau. Pha init có trần 10 giây.
+Pha init chạy **một lần cho mỗi environment**; model ở lại trong RAM cho mọi request sau của environment đó.
+
+Pha init của function on-demand có trần 10 giây. Quá trần thì Lambda bỏ init đó và chạy lại toàn bộ init trong request đầu tiên, tính vào timeout 29 giây của request. Đo trên Lambda, init mất 7–10 giây ([`sizing.md`](sizing.md), L6), nên handler không để việc nạp model quyết định lúc init kết thúc: hạn 8,5 giây cộng khoảng 0,3 giây trước khi import (khởi động Python, `awslambdaric`) còn dư hơn 1 giây so với trần.
+
+Nạp model lỗi (vd. không đọc được S3) thì thread nạp lại ngay; request đang chờ lúc lỗi xảy ra nhận `503 model_unavailable`, request sau chờ lần nạp mới.
 
 ### Bước 4. Environment nhận event, gọi handler
 
@@ -192,7 +197,8 @@ Request tiếp theo tới cùng environment (warm) bắt đầu thẳng từ bư
 | User không có file trên S3 | FastAPI (bước 5.3) | `404 user_not_found` |
 | S3 trả lỗi quyền, mất kết nối | `S3PointStore` báo `DataUnavailable` (bước 5.3–5.4) | `503 data_unavailable` |
 | Path không có trong contract | FastAPI | `404` |
-| Init lỗi (không tải được model) | Dịch vụ Lambda (bước 3) | `500 Internal Server Error` của API Gateway; request sau thử init lại |
+| Nạp model lỗi (không tải được model) | Handler (bước 3) | `503 model_unavailable` theo contract; thread nạp lại, request sau chờ lần nạp mới |
+| Init lỗi vì lý do khác (vd. thiếu biến môi trường) | Dịch vụ Lambda (bước 3) | `500 Internal Server Error` của API Gateway; request sau thử init lại |
 | Function chạy quá timeout của nó hoặc vượt RAM | Dịch vụ Lambda | `500 Internal Server Error` của API Gateway |
 | Không có kết quả sau 30 giây (giới hạn của API Gateway) | API Gateway | `503 Service Unavailable` của API Gateway |
 

@@ -46,6 +46,7 @@ sửa version đó nữa: đổi tham số thì tạo version mới. Config củ
 11. [`docs/infra/lambda/serving_data.md`](docs/infra/lambda/serving_data.md): phương án AWS Lambda (nhánh `main`), dữ liệu điểm cho API: bố cục mỗi user một file parquet trên S3, cách dựng / upload, cách API đọc, số byte và số GET mỗi request.
 12. [`docs/infra/lambda/request_flow.md`](docs/infra/lambda/request_flow.md): một request đi qua API Gateway, Lambda, handler (Mangum) và FastAPI, từng khâu nhận gì và trả gì.
 13. [`docs/infra/lambda/sizing.md`](docs/infra/lambda/sizing.md): số đo RAM và thời gian của image để chọn RAM cho function.
+14. [`docs/infra/lambda/knowledges.md`](docs/infra/lambda/knowledges.md): kiến thức nền của phương án Lambda: vòng đời execution environment, payload v2, container image, version / alias, quyền, HTTP API, throttling, reserved concurrency, đọc log; cold start và các cách giảm.
 
 ## Chạy lại
 
