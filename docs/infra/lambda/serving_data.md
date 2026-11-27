@@ -1,6 +1,6 @@
 # Dữ liệu điểm GPS cho API
 
-API chạy model trên điểm GPS của một user, nên mỗi request cần đọc nhanh điểm của đúng user đó, có thể lọc theo khoảng thời gian. Trang này mô tả bố cục dữ liệu trên S3, cách dựng và upload, cách API đọc, và số đo dùng để chọn bố cục.
+API chạy model trên điểm GPS của một user, nên mỗi request cần đọc nhanh điểm của đúng user đó, có thể lọc theo khoảng thời gian. Trang này mô tả bố cục dữ liệu trên S3, cách dựng và upload, cách API đọc, và số đo dùng để chọn bố cục. Chạy API ở local với dữ liệu này: README, mục "API ở local".
 
 Code: [`src/geolife_api/export_points.py`](../../../src/geolife_api/export_points.py) dựng và upload, [`src/geolife_api/points.py`](../../../src/geolife_api/points.py) đọc (`S3PointStore`).
 
@@ -95,8 +95,7 @@ sequenceDiagram
   Note over API: lọc từng dòng theo [start, end)
 ```
 
-- **Đọc theo `Range`.** `S3ObjectFile` là file object có `seek`; mỗi lần pyarrow đọc là một GET có header `Range`. pyarrow đọc với `pre_buffer=True`, gộp các column chunk liền nhau thành một đoạn (tối đa 32 MB mỗi đoạn), nên mỗi request tốn 2–3 GET.
-- **Credential.** Đọc S3 bằng boto3, cùng chuỗi credential với các lệnh AWS khác của repo (`AWS_PROFILE` ở local, role của function trên Lambda). AWS SDK C++ trong `pyarrow.fs.S3FileSystem` không đọc được credential `login_session` do `aws login` tạo.
+- **Đọc theo `Range`.** `S3ObjectFile` là file object có `seek`, mỗi lần pyarrow đọc là một GET có `Range`; `pre_buffer=True` gộp các column chunk liền nhau, nên mỗi request tốn 2–3 GET. Đọc bằng boto3 thay cho `pyarrow.fs.S3FileSystem` vì lý do credential ([`knowledges.md`](knowledges.md) mục 2).
 - **Phụ thuộc.** `geolife_api.points` không import `geolife`: image của API chỉ chứa `geolife_api`. Bố cục (`MANIFEST`, `user_file`) định nghĩa ở đây, `export_points` dùng lại.
 
 **Lỗi và mã trả về:**
@@ -108,7 +107,7 @@ sequenceDiagram
 | S3 trả lỗi khác 404 (thiếu quyền, `403`), mất kết nối, file hỏng | `DataUnavailable` | `503 data_unavailable` |
 | `GET /v1/health` | `ping`: đọc và parse được `manifest.json` | `data_available` |
 
-Quyền cần cho role đọc dữ liệu: `s3:GetObject` trên `data/serving/*` và `s3:ListBucket` trên bucket với điều kiện prefix `data/serving/`. Thiếu `s3:ListBucket` thì S3 trả `403` cho object không tồn tại; khi đó user không tồn tại bị báo thành `503 data_unavailable` thay cho `404 user_not_found`.
+Phân biệt được `404` với `503` cần `s3:ListBucket` trên prefix `data/serving/` ([`knowledges.md`](knowledges.md) mục 3).
 
 ## 6. Số đo
 
@@ -143,25 +142,3 @@ Quyền cần cho role đọc dữ liệu: `s3:GetObject` trên `data/serving/*`
 - Mỗi request tốn 2–3 GET bất kể số row group: một GET lấy footer, phần dữ liệu được gộp thành một hoặc hai đoạn.
 - Byte tải xấp xỉ kích thước file khi đọc toàn bộ; với user nhỏ, lần đọc footer (64 KB cuối file) đã phủ gần hết file nên tổng byte nhỉnh hơn kích thước file.
 - Lọc theo khoảng thời gian giảm byte tải theo số row group: user 153 đọc 1 tháng chỉ tải 1 trên 17 row group (3,5 MB thay vì 61 MB). Đơn vị nhỏ nhất là một row group (~3,5 MB với user 153), nên user nhỏ hơn một row group không lợi gì từ lọc thời gian.
-
-## 7. Chạy API ở local
-
-```bash
-make serving-points
-```
-
-```bash
-make api
-```
-
-`make api` chạy `uvicorn` ở `http://localhost:8000` với `POINTS_URI` trỏ vào `data/serving/v_1/`; `MODEL_URI` và biến Databricks đọc từ `.env`. Đọc từ S3 thay cho thư mục local:
-
-```bash
-make api POINTS_URI=s3://geolife-<account_id>-artifacts/data/serving/v_1
-```
-
-Kiểm tra trên API đang chạy:
-
-```bash
-API_URL=http://localhost:8000 uv run pytest -m integration
-```

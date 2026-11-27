@@ -22,8 +22,8 @@ Từ quỹ đạo GPS của bộ [GeoLife Trajectories 1.3](https://www.microsof
 | `docs/` | Tài liệu, đọc theo thứ tự bên dưới; `openapi.yaml` là contract của API |
 | `src/geolife_api/` | API theo contract `docs/openapi.yaml`: đọc điểm của user qua một nguồn điểm (`service.PointStore`, hiện thực là `points.S3PointStore` trên S3 hoặc thư mục local), chạy model version nạp từ MLflow registry trên Databricks hoặc bản phát hành trên S3 (`main` là phần HTTP, `service` là logic). `export_points` dựng điểm theo user cho API và upload lên S3; `lambda_handlers` là handler trên AWS Lambda (event của API Gateway → app FastAPI qua Mangum) |
 | `docker/` | `api.Dockerfile`: image của API trên Lambda (`linux/arm64`, chỉ chứa `geolife_api`) |
-| `scripts/` | `promote.py`: đổi alias `@champion` / `@challenger` trên registry thành số model version, phát hành lên S3 version nào chưa có; `measure_lambda_memory.py`: đo RAM / thời gian của image dưới giới hạn của một function |
-| `infra/` | Terraform, mỗi thư mục một stack: `bootstrap` (bucket state), `foundation` (bucket artifacts, ECR, budget) |
+| `scripts/` | `promote.py`: đổi alias `@champion` / `@challenger` trên registry thành Lambda version cho alias `live` / `challenger` (phát hành lên S3 và đóng Lambda version nếu thiếu); `canary_check.py`: đo một canary qua HTTP API theo Lambda version; `measure_lambda_memory.py`, `measure_lambda_latency.py`: đo RAM, cold start, thời gian request |
+| `infra/` | Terraform, mỗi thư mục một stack: `bootstrap` (bucket state), `foundation` (bucket artifacts, ECR, budget), `app` (function Lambda, alias `live` / `challenger`, Function URL, HTTP API) |
 | `.env.example` | Biến môi trường ở local (token Databricks, MLflow); `make env` copy thành `.env` (không commit) |
 | `tests/` | `test_parity` (chạy từng user, đọc từ `points.parquet` và từ bản dựng cho API, khớp kết quả chạy hàng loạt), `test_mlflow_model`, `test_publish`, `test_export_points`, `api/` (HTTP với nguồn điểm / model giả; handler Lambda với event mẫu của API Gateway; `S3PointStore`), `integration/` (với API đang chạy, theo `API_URL`) |
 | `data/` | Không commit. `Geolife_Trajectories/` là dữ liệu gốc; `preprocess/v_<n>/` là output của từng version preprocess; `serving/v_<n>/` là điểm theo user cho API, dựng từ `preprocess/v_<n>/` |
@@ -43,10 +43,7 @@ sửa version đó nữa: đổi tham số thì tạo version mới. Config củ
 8. [`docs/models/dbscan_v1.md`](docs/models/dbscan_v1.md): model dbscan v1 (DBSCAN trên ô lưới, trọng số thời gian, mỗi cụm là một place; toạ độ ô = tâm hình học), cách chọn từng tham số, kết quả holdout.
 9. [`docs/models/dbscan_v2.md`](docs/models/dbscan_v2.md): model dbscan v2 (toạ độ ô = trung bình có trọng số thời gian của các điểm trong ô), cùng quy trình chọn tham số với dbscan v1.
 10. [`docs/infra/fargate/`](docs/infra/fargate/overview.md): phương án triển khai bằng ECS Fargate + RDS (code ở nhánh `fargate`): hạ tầng qua sơ đồ, giá trị cấu hình của từng stack ([`config_relation.md`](docs/infra/fargate/config_relation.md)), kiến thức nền ([`knowledges.md`](docs/infra/fargate/knowledges.md)), số đo RAM và thời gian để chọn cỡ task ([`task_sizing.md`](docs/infra/fargate/task_sizing.md)).
-11. [`docs/infra/lambda/serving_data.md`](docs/infra/lambda/serving_data.md): phương án AWS Lambda (nhánh `main`), dữ liệu điểm cho API: bố cục mỗi user một file parquet trên S3, cách dựng / upload, cách API đọc, số byte và số GET mỗi request.
-12. [`docs/infra/lambda/request_flow.md`](docs/infra/lambda/request_flow.md): một request đi qua API Gateway, Lambda, handler (Mangum) và FastAPI, từng khâu nhận gì và trả gì.
-13. [`docs/infra/lambda/sizing.md`](docs/infra/lambda/sizing.md): số đo RAM và thời gian của image để chọn RAM cho function.
-14. [`docs/infra/lambda/knowledges.md`](docs/infra/lambda/knowledges.md): kiến thức nền của phương án Lambda: vòng đời execution environment, payload v2, container image, version / alias, quyền, HTTP API, throttling, reserved concurrency, đọc log; cold start và các cách giảm.
+11. [`docs/infra/lambda/`](docs/infra/lambda/overview.md): phương án AWS Lambda đang chạy (nhánh `main`): kiến trúc, dữ liệu trên S3, phát hành và canary, cấu hình, số đo, kiến thức nền. Bắt đầu từ [`overview.md`](docs/infra/lambda/overview.md); trang này có danh sách các trang còn lại.
 
 ## Chạy lại
 
@@ -103,7 +100,8 @@ make api
 ```
 
 `make aws-export-points` upload bản dựng lên `s3://geolife-<account_id>-artifacts/data/serving/v_1/`; chi tiết ở
-[`docs/infra/lambda/serving_data.md`](docs/infra/lambda/serving_data.md).
+[`docs/infra/lambda/serving_data.md`](docs/infra/lambda/serving_data.md). `make api POINTS_URI=s3://geolife-<account_id>-artifacts/data/serving/v_1`
+đọc điểm từ S3 thay cho thư mục local; `API_URL=http://localhost:8000 uv run pytest -m integration` kiểm API đang chạy.
 
 ## Image của API
 
@@ -118,3 +116,14 @@ make aws-push
 `aws-build` build `docker/api.Dockerfile` cho `linux/arm64`, tag theo git SHA; `aws-push` đẩy lên ECR và từ chối khi
 còn thay đổi chưa commit. Image chạy handler `geolife_api.lambda_handlers.api`
 ([`docs/infra/lambda/request_flow.md`](docs/infra/lambda/request_flow.md)).
+
+## API trên AWS
+
+```bash
+make aws-promote
+```
+
+`aws-promote` đọc `@champion` / `@challenger` trên registry, phát hành lên S3 version nào chưa có, rồi đưa alias `live`
+(API Gateway gọi) lên Lambda version của `@champion` và chia `canary_weight` % (`infra/app/canary.auto.tfvars`) sang
+Lambda version của `@challenger`. Kiểm tra bằng `make aws-smoke` và `make aws-canary-check`; chặn mọi request bằng
+`make aws-pause`. Quy trình đầy đủ ở [`docs/infra/lambda/deployment.md`](docs/infra/lambda/deployment.md).

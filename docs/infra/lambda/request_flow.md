@@ -92,7 +92,7 @@ curl -X POST "https://abc123.execute-api.ap-southeast-1.amazonaws.com/v1/users/5
 
 Dịch vụ Lambda giữ event trong lúc:
 
-1. Đổi alias `live` thành một Lambda version (bản chụp bất biến của image + cấu hình, gồm `MODEL_URI` của một registry version). Khi đang chạy canary, alias chia traffic theo trọng số giữa hai Lambda version.
+1. Đổi alias `live` thành một Lambda version (bản chụp bất biến của image + cấu hình, gồm `MODEL_URI` của một registry version). Khi đang chạy canary, alias chia ngẫu nhiên từng lần gọi theo trọng số giữa hai Lambda version: hiện tại 80% vào version 9 (registry v1), 20% vào version 8 (registry v3) ([`deploy_strategies.md`](deploy_strategies.md)). Version được chọn là `ExecutedVersion` trong metric và là số trong tên log stream của environment.
 2. Tìm một execution environment đang rảnh của Lambda version đó.
    - **Có (warm):** dùng luôn, sang bước 4.
    - **Không có (cold start):** tạo environment mới và chạy **pha init** trước:
@@ -113,7 +113,7 @@ ENTRYPOINT: python -m awslambdaric geolife_api.lambda_handlers.api
 
 Pha init chạy **một lần cho mỗi environment**; model ở lại trong RAM cho mọi request sau của environment đó.
 
-Pha init của function on-demand có trần 10 giây. Quá trần thì Lambda bỏ init đó và chạy lại toàn bộ init trong request đầu tiên, tính vào timeout 29 giây của request. Đo trên Lambda, init mất 7–10 giây ([`sizing.md`](sizing.md), L6), nên handler không để việc nạp model quyết định lúc init kết thúc: hạn 8,5 giây cộng khoảng 0,3 giây trước khi import (khởi động Python, `awslambdaric`) còn dư hơn 1 giây so với trần.
+Pha init của function on-demand có trần 10 giây, trong khi import và nạp model mất 7–12 giây; hạn 8,5 giây giữ init luôn dưới trần ([`knowledges.md`](knowledges.md) mục 19–20).
 
 Nạp model lỗi (vd. không đọc được S3) thì thread nạp lại ngay; request đang chờ lúc lỗi xảy ra nhận `503 model_unavailable`, request sau chờ lần nạp mới.
 
@@ -204,7 +204,20 @@ Request tiếp theo tới cùng environment (warm) bắt đầu thẳng từ bư
 
 Ba dòng cuối không đi qua code của dự án, nên không có định dạng lỗi của contract. RAM và timeout của function phải đủ cho request lớn nhất; số đo để chọn ở [`sizing.md`](sizing.md).
 
-## 5. Kiểm tra handler ở local
+## 5. Đường vào thứ hai: Function URL của alias `challenger`
+
+Máy dev gọi thẳng version của `@challenger` mà không qua API Gateway và không qua chia ngẫu nhiên của `live`:
+
+```
+make aws-call-challenger P=/v1/users/5/predictions
+  curl ký SigV4 (credential của profile) ─► https://<id>.lambda-url.ap-southeast-1.on.aws/v1/users/5/predictions
+  Lambda kiểm chữ ký và quyền lambda:InvokeFunctionUrl (không hợp lệ: 403, code không chạy)
+  ─► alias challenger ─► Lambda version 8 ─► bước 3–6 như trên
+```
+
+Function URL gửi event cùng định dạng payload v2 như HTTP API, nên handler, Mangum và FastAPI xử lý y hệt. Khác biệt: không có throttling của stage, không có access log của API Gateway, timeout là timeout của function (29 giây). Alias `challenger` và `live` trỏ cùng version 8 thì dùng chung environment của version đó: gọi thử qua Function URL làm ấm environment cho phần 20% traffic của `live`.
+
+## 6. Kiểm tra handler ở local
 
 Handler được kiểm mà không cần AWS: test tạo event giống bước 2 rồi gọi thẳng `handler(event, context)` với nguồn điểm và model giả ([`tests/api/test_lambda_handler.py`](../../../tests/api/test_lambda_handler.py)). Test kiểm mã trả về và body theo contract (health, dự đoán, user không tồn tại, `start` sai định dạng, khoảng thời gian ngược, path lạ) và header `x-cold-start` chỉ có ở response đầu tiên.
 

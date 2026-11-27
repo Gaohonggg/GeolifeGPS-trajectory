@@ -1,10 +1,14 @@
-# Kiến thức nền: Lambda, container image, HTTP API, cold start
+# Kiến thức nền: parquet trên S3, Lambda, HTTP API, canary, cold start
 
-Tài liệu ghi lại các concept đứng sau API trên AWS Lambda. Mỗi mục theo thứ tự: **là gì → vì sao cần → ví dụ → dự án dùng thế nào**. Đường đi của một request qua từng khâu ở [request_flow.md](request_flow.md); số đo RAM và thời gian ở [sizing.md](sizing.md); Terraform state và IAM nói chung ở [../fargate/knowledges.md](../fargate/knowledges.md).
+Tài liệu ghi lại các concept đứng sau API trên AWS Lambda. Mỗi mục theo thứ tự: **là gì → vì sao cần → ví dụ → dự án dùng thế nào**. Kiến trúc tổng thể ở [overview.md](overview.md); đường đi của một request ở [request_flow.md](request_flow.md); số đo ở [sizing.md](sizing.md); Terraform state và IAM nói chung ở [../fargate/knowledges.md](../fargate/knowledges.md).
 
-- Phần A (mục 1–4): chạy API dưới dạng handler Lambda, kiểm ở local.
-- Phần B (mục 5–10): function, version, alias, HTTP API, giới hạn traffic, log trên AWS.
-- Phần C (mục 11–14): cold start, và các cách giảm cold start (đọc khi cần tối ưu).
+| Phần | Mục | Chủ đề |
+| --- | --- | --- |
+| A | 1–3 | Dữ liệu trên S3: parquet, đọc theo `Range`, `403` thay cho `404` |
+| B | 4–7 | Chạy API dưới dạng handler Lambda |
+| C | 8–13 | Function, version, alias, quyền, HTTP API, giới hạn traffic, log |
+| D | 14–17 | Canary: alias có trọng số, metric theo version, Function URL, so latency |
+| E | 18–21 | Cold start và các cách giảm (đọc khi cần tối ưu) |
 
 ## Bản đồ liên hệ
 
@@ -17,10 +21,12 @@ flowchart LR
     integ["Integration<br/>AWS_PROXY, payload v2"]
   end
   perm["Resource-based policy<br/>(aws_lambda_permission)"]
+  dev["Máy dev<br/>ký SigV4"]
   subgraph FN["Function geolife-api"]
     latest["$LATEST<br/>(sửa được)"]
     ver["Version 1, 2, 3…<br/>(bất biến)"]
-    alias["Alias live"]
+    alias["Alias live<br/>(có trọng số)"]
+    chal["Alias challenger<br/>+ Function URL"]
     rc["Reserved concurrency"]
   end
   subgraph ENV["Execution environment"]
@@ -28,31 +34,86 @@ flowchart LR
     invoke["Pha invoke<br/>timeout 29 giây"]
   end
   role["Execution role"]
-  s3[("S3")]
-  logs[("CloudWatch Logs<br/>platform.report")]
+  s3[("S3<br/>parquet theo user, model")]
+  logs[("CloudWatch<br/>Logs, metric theo ExecutedVersion")]
 
   client --> stage --> route --> integ
   integ -- "gọi alias" --> alias
   perm -. "cho phép" .-> integ
+  dev --> chal
   latest -- "publish" --> ver
-  alias -- "trỏ tới" --> ver
+  alias -- "trỏ tới 1–2 version" --> ver
+  chal -- "trỏ tới" --> ver
   ver -- "mỗi version có environment riêng" --> init --> invoke
   rc -. "trần số environment" .-> ENV
   invoke -- "quyền của code" --> role --> s3
   ENV --> logs
 ```
 
-Ba sợi dây xuyên suốt:
+Bốn sợi dây xuyên suốt:
 
 - **Version bất biến + alias** tách "code nào đang chạy" khỏi "code mới nhất": đổi alias là đổi traffic, rollback là trỏ alias về version cũ, không build lại.
-- **Mỗi Lambda version có environment riêng**: mỗi lần alias chuyển sang version mới, mọi request đầu tiên phải chờ pha init. Vì vậy thời gian init quyết định trải nghiệm sau mỗi lần deploy.
+- **Alias có trọng số** chia traffic giữa hai version: đó là canary, không cần load balancer.
+- **Mỗi Lambda version có environment riêng**: mỗi lần alias chuyển sang version mới, các request đầu phải chờ pha init. Thời gian init quyết định trải nghiệm sau mỗi lần deploy.
 - **Hai loại quyền**: execution role là quyền *của code* khi gọi AWS; resource-based policy là quyền *gọi vào* function.
 
 ---
 
-# Phần A. Handler Lambda
+# Phần A. Dữ liệu trên S3
 
-## 1. Vòng đời của execution environment
+## 1. Parquet: row group, thống kê, predicate pushdown
+
+**Là gì.** Parquet là định dạng file theo cột. Một file chia thành các **row group** (một nhóm dòng liên tiếp); trong mỗi row group, mỗi cột là một **column chunk** nén riêng. Cuối file là **footer**: schema, vị trí byte của từng column chunk, và **thống kê** min / max / số null của từng cột trong từng row group.
+
+```
+user=153.parquet
+┌──────────── row group 0 (131 072 dòng) ────────────┐
+│ user │ ts_utc │ ts_local │ lat │ lon │ tz          │   mỗi ô là một column chunk, nén zstd
+└────────────────────────────────────────────────────┘
+┌──────────── row group 1 ───────────────────────────┐
+│ …                                                  │
+└────────────────────────────────────────────────────┘
+  … (17 row group)
+footer: schema; với từng row group: vị trí byte, min / max ts_utc, …
+```
+
+**Predicate pushdown** là đẩy điều kiện lọc xuống tầng đọc file: đọc footer trước, dùng thống kê để bỏ qua row group chắc chắn không có dòng thoả điều kiện, chỉ tải và giải nén các row group còn lại.
+
+**Vì sao cần.** Điểm của user đã sort theo `ts_utc`, nên mỗi row group phủ một khoảng thời gian liền nhau. Request có `start` / `end` chỉ cần các row group có `[min, max]` của `ts_utc` giao với `[start, end)`.
+
+**Ví dụ.** User 153 có 17 row group. Request 1 tháng chỉ chạm 1 row group: tải 3,5 MB thay vì 61 MB ([serving_data.md](serving_data.md) D2).
+
+**Kích thước row group là một đánh đổi.** Row group lớn nén tốt hơn nhưng đơn vị đọc nhỏ nhất lớn hơn; row group nhỏ lọc mịn hơn nhưng footer dài hơn. Lựa chọn của dự án (131 072 dòng) ở [serving_data.md](serving_data.md) mục 2.
+
+**Dự án dùng thế nào.** `row_groups_in_range` trong [`src/geolife_api/points.py`](../../../src/geolife_api/points.py) đọc thống kê `ts_utc` trong footer và chọn row group; `read_row_groups` chỉ đọc các row group đó, rồi lọc từng dòng theo `[start, end)`.
+
+## 2. Đọc parquet trên S3 theo `Range`
+
+**Là gì.** S3 trả một phần object khi GET có header `Range: bytes=<từ>-<tới>`. Một thư viện đọc parquet cần một file object có `seek` và `read`; trên S3, mỗi lần `read` là một GET có `Range`.
+
+**Vì sao cần.** Không phải tải cả file: đọc footer (một GET ở cuối file), rồi chỉ GET các byte của row group cần. pyarrow với `pre_buffer=True` gộp các column chunk liền nhau thành một đoạn (tối đa 32 MB), nên số GET nhỏ và không phụ thuộc số cột.
+
+**Ví dụ.** Đọc toàn bộ user 83: GET 64 KB cuối file (footer, và với file nhỏ thì gần như cả file), GET phần dữ liệu. Hai GET mỗi request, 3 GET với user 153.
+
+**Vì sao không dùng `pyarrow.fs.S3FileSystem`.** Nó dùng AWS SDK C++, không đọc được credential `login_session` mà `aws login` tạo ở máy dev. Đọc bằng boto3 dùng cùng chuỗi credential với mọi lệnh AWS khác của repo (`AWS_PROFILE` ở local, execution role trên Lambda).
+
+**Dự án dùng thế nào.** `S3ObjectFile` là file object chỉ đọc trên một object S3 (mỗi `readinto` là một `get_object` có `Range`); `S3PointStore` mở nó bằng `pq.ParquetFile(f, pre_buffer=True)`. Cùng code đọc được thư mục local khi `POINTS_URI` là đường dẫn.
+
+## 3. S3 trả `403` thay cho `404`
+
+**Là gì.** GET hoặc HEAD một object không tồn tại trả `404 NoSuchKey` **chỉ khi** người gọi có `s3:ListBucket` trên bucket. Không có quyền đó, S3 trả `403 AccessDenied`: nếu trả `404`, người không được liệt kê bucket vẫn dò được key nào tồn tại.
+
+**Vì sao cần.** API phân biệt "user không tồn tại" (`404 user_not_found`) với "không đọc được nguồn" (`503 data_unavailable`). Thiếu `s3:ListBucket`, mọi user không tồn tại đều thành `403`, tức bị báo là `503`.
+
+**Ví dụ.** `HEAD s3://…/data/serving/v_1/points/user=999999.parquet`: role có `ListBucket` trên prefix `data/serving/` → `404` → API trả `404 user_not_found`. Role thiếu quyền đó → `403` → API trả `503 data_unavailable`.
+
+**Dự án dùng thế nào.** Execution role có `s3:ListBucket` trên bucket artifacts với điều kiện `s3:prefix` là `data/serving/*` hoặc `models/geolife_home_office/*`: đủ để S3 trả `404`, không cho liệt kê phần còn lại của bucket ([config_relation.md](config_relation.md) mục 5).
+
+---
+
+# Phần B. Handler Lambda
+
+## 4. Vòng đời của execution environment
 
 **Là gì.** Execution environment là một micro-VM (Firecracker) chạy image của function. Nó đi qua bốn trạng thái:
 
@@ -70,6 +131,7 @@ Một environment xử lý **đúng một request tại một thời điểm**. 
 - Code ở cấp module (nạp model, tạo boto3 client) chạy một lần ở pha init rồi được dùng lại cho mọi request sau của environment đó; code trong handler chạy mỗi request.
 - Việc chạy nền sau khi trả response (thread, `asyncio.create_task`) bị freeze cùng process; nó chỉ chạy tiếp khi có request kế tiếp. Không dựa vào nó để ghi log hay gửi dữ liệu "sau".
 - Lambda có thể dựng environment trước khi có request (*proactive initialization*), nên trong log có những pha init không đi kèm request nào.
+- RAM của environment chỉ chứa một request tại một thời điểm, nên RAM của function chỉ cần đủ cho request lớn nhất ([sizing.md](sizing.md)).
 
 **Ví dụ.** Log của một environment mới (định dạng log JSON, rút gọn; số minh hoạ):
 
@@ -86,7 +148,7 @@ Một environment xử lý **đúng một request tại một thời điểm**. 
 
 **Dự án dùng thế nào.** `lambda_handlers._init()` chạy ở pha init: đọc `Settings`, nạp model ở thread nền, dựng nguồn điểm và app FastAPI. Handler (`make_handler`) chỉ chuyển event cho Mangum. Response đầu tiên của mỗi environment có header `X-Cold-Start: 1` để script đo phía client tách request có cold start.
 
-## 2. Event payload v2 của HTTP API
+## 5. Event payload v2 của HTTP API
 
 **Là gì.** Lambda không nhận HTTP. API Gateway đóng gói request thành một dict JSON (event) và nhận lại một dict (response). HTTP API có hai định dạng; dự án dùng **v2**:
 
@@ -97,13 +159,15 @@ Một environment xử lý **đúng một request tại một thời điểm**. 
 | Header | `headers` + `multiValueHeaders` | `headers` (tên viết thường), cookie tách riêng ở `cookies` |
 | Response | `statusCode`, `headers`, `multiValueHeaders`, `body`, `isBase64Encoded` | `statusCode`, `headers`, `cookies`, `body`, `isBase64Encoded`; trả về chuỗi trơn cũng được (API Gateway coi là body JSON với mã 200) |
 
+Function URL dùng cùng định dạng v2, nên cùng handler phục vụ được cả hai đường vào.
+
 **Vì sao cần.** Adapter (Mangum) phải đọc đúng định dạng để dựng lại request; test ở local phải tạo event đúng như API Gateway gửi thì mới có giá trị.
 
 **Ví dụ.** `POST /v1/users/5/predictions?start=2009-01-01T00:00:00Z` thành event: `"rawPath": "/v1/users/5/predictions"`, `"rawQueryString": "start=2009-01-01T00:00:00Z"`, `"requestContext": {"http": {"method": "POST", …}, "stage": "$default"}`. Event đầy đủ ở [request_flow.md](request_flow.md), bước 2.
 
 **Dự án dùng thế nào.** Integration của HTTP API đặt `payload_format_version = "2.0"`. `tests/api/test_lambda_handler.py` dựng event v2 (`http_api_event`) và gọi thẳng handler, kiểm mã trả về và body theo contract.
 
-## 3. Container image cho Lambda
+## 6. Container image cho Lambda
 
 **Là gì.** Function dạng image: Lambda kéo image từ ECR và chạy nó như một environment. Image phải có một **runtime interface client** (RIC): chương trình gọi **Runtime API** (endpoint HTTP nội bộ `AWS_LAMBDA_RUNTIME_API`) để lấy event và gửi kết quả. Với Python, RIC là package `awslambdaric`.
 
@@ -118,6 +182,7 @@ Ràng buộc của môi trường chạy:
 - **Chỉ `/tmp` ghi được** (512 MB mặc định). Thư viện nào ghi cache vào `$HOME` hay cạnh file `.py` sẽ lỗi.
 - **Image chỉ một nền tảng.** Lambda không nhận manifest list / OCI index. `docker buildx` mặc định thêm attestation (provenance, SBOM), khiến kết quả thành index, nên phải tắt.
 - Image tối đa 10 GB (chưa nén). Lambda đọc file của image theo khối và cache lại; lần đầu một image mới được chạy, việc đọc file chậm hơn hẳn các lần sau.
+- Lambda version ghim image theo digest. Image bị xoá khỏi ECR thì version đó không chạy được nữa.
 
 **Vì sao chọn image thay vì gói zip.** Gói zip giới hạn 250 MB sau giải nén. Thư viện của API (pandas, pyarrow, scikit-learn, scipy, numba, mlflow) vượt quá giới hạn này; image cũng cho chạy y hệt ở local bằng Docker.
 
@@ -133,7 +198,7 @@ docker buildx build --platform linux/arm64 --provenance=false --sbom=false -f do
 - `compileall` lúc build vì Python không ghi được `.pyc` vào `/app` khi chạy; `HOME=/tmp`, `NUMBA_CACHE_DIR=/tmp/numba` cho cache của numba.
 - Image không chứa package `geolife`: code thuật toán đi kèm model version (thư mục MLflow model trên S3).
 
-## 4. Vì sao lifespan của ASGI không khớp vòng đời Lambda
+## 7. Vì sao lifespan của ASGI không khớp vòng đời Lambda
 
 **Là gì.** Lifespan là cơ chế của ASGI để chạy code một lần khi server khởi động (startup) và khi tắt (shutdown). Với uvicorn, startup chạy một lần cho cả process.
 
@@ -145,14 +210,14 @@ docker buildx build --platform linux/arm64 --provenance=false --sbom=false -f do
 **Dự án dùng thế nào.**
 
 - Trên Lambda: `Mangum(app, lifespan="off")`; model và nguồn điểm dựng ở pha init, gắn vào app qua `create_app(state=…)`.
-- Ở local (`make api`): `create_app()` không có `state`, lifespan dựng nguồn điểm và nạp model ở thread nền như trước.
+- Ở local (`make api`): `create_app()` không có `state`, lifespan dựng nguồn điểm và nạp model ở thread nền.
 - `api` là thuộc tính lười của module (`__getattr__`): `awslambdaric` lấy `api` thì `_init()` mới chạy, nên test import được `lambda_handlers` mà không nạp model.
 
 ---
 
-# Phần B. Function, version, alias, HTTP API
+# Phần C. Function, version, alias, HTTP API
 
-## 5. Lambda version, alias và `publish`
+## 8. Lambda version, alias và `publish`
 
 **Là gì.**
 
@@ -160,7 +225,7 @@ docker buildx build --platform linux/arm64 --provenance=false --sbom=false -f do
 | --- | --- |
 | `$LATEST` | Cấu hình làm việc của function: image (theo digest), RAM, timeout, biến môi trường, role. Sửa được |
 | Version (`1`, `2`, `3`…) | Bản chụp **bất biến** của `$LATEST` tại lúc publish. Số tăng dần, không dùng lại kể cả khi version bị xoá |
-| Alias (`live`) | Tên trỏ tới một version; gọi `geolife-api:live` là gọi version đó. Đổi version của alias là thao tác tức thời |
+| Alias (`live`, `challenger`) | Tên trỏ tới một version (hoặc chia giữa hai version, mục 14); gọi `geolife-api:live` là gọi version đó. Đổi version của alias là thao tác tức thời |
 
 Mỗi version có các environment của riêng nó. Alias chuyển sang version mới thì request sau đó rơi vào environment mới, tức là có cold start; environment của version cũ bị bỏ dần.
 
@@ -169,30 +234,11 @@ Mỗi version có các environment của riêng nó. Alias chuyển sang version
 - Gọi thẳng `$LATEST` thì mỗi lần `terraform apply` đổi cấu hình là traffic thật đổi theo ngay, không có bước kiểm và không quay lại được.
 - Với version + alias: deploy là tạo version mới; đưa vào traffic là đổi alias; rollback là trỏ alias về version cũ đã có sẵn, không build hay apply lại image.
 
-**`publish = true` trong Terraform.** Mỗi lần code hoặc cấu hình của `$LATEST` đổi, provider gọi `PublishVersion` và `aws_lambda_function.api.version` trả về số version mới. Không đổi gì thì không có version mới.
+**`publish = true` trong Terraform.** Mỗi lần code hoặc cấu hình của `$LATEST` đổi, provider gọi `PublishVersion` và `aws_lambda_function.api.version` trả về số version mới. Không đổi gì thì không có version mới. Lambda không tìm version cũ trùng cấu hình: trở lại một cấu hình cũ vẫn tạo version mới (version 5 ở [deployment.md](deployment.md) mục 2).
 
-**Ví dụ.** Các version đã tạo khi đo ở L2.1:
+**Dự án dùng thế nào.** `make aws-promote` chọn version cho alias `live` và `challenger`, dùng lại version cũ khi trùng cấu hình ([deployment.md](deployment.md) mục 3).
 
-| Version | Image | RAM | Registry version |
-| --- | --- | --- | --- |
-| 1 | `0194a06c8733` | 2 048 MB | v1 |
-| 2 | `dce878c4e1e7` (thêm log thời gian init) | 2 048 MB | v1 |
-| 3 | `dce878c4e1e7` | 3 008 MB | v1 |
-| 4 | `dce878c4e1e7` | 1 769 MB | v1 |
-| 5 | `dce878c4e1e7` | 2 048 MB | v1 |
-
-Version 5 giống hệt version 2 nhưng vẫn là version mới: Lambda publish theo thay đổi của `$LATEST` (1 769 → 2 048 MB), không tìm version cũ trùng cấu hình.
-
-**Dự án dùng thế nào.** `make aws-promote` ([`scripts/promote.py`](../../../scripts/promote.py)) quyết định alias `live` trỏ vào version nào:
-
-1. `terraform apply` để `$LATEST` khớp code Terraform hiện tại.
-2. Đọc cấu hình của `$LATEST` (image, RAM, timeout, role, biến môi trường trừ `MODEL_URI`, …) và tìm version có cùng cấu hình **và** cùng `MODEL_URI` của `@champion`; ưu tiên version alias đang trỏ tới.
-3. Không có thì đặt `latest_model_version` = `@champion` và apply để Lambda đóng version mới.
-4. Ghi `live = {lambda_version, model_version}` vào `models.auto.tfvars.json` và apply.
-
-So cả cấu hình chứ không chỉ image và model, vì đổi RAM hay timeout cũng phải tới được traffic thật.
-
-## 6. Hai loại quyền: execution role và resource-based policy
+## 9. Hai loại quyền: execution role và resource-based policy
 
 **Là gì.**
 
@@ -206,12 +252,14 @@ So cả cấu hình chứ không chỉ image và model, vì đổi RAM hay timeo
 
 Permission gắn theo **qualifier**. Integration gọi ARN của alias (`…:function:geolife-api:live`), nên permission phải có `qualifier = "live"`; permission cho function không qualifier không áp dụng cho lần gọi qua alias.
 
+Với người gọi cùng tài khoản (user dev), quyền có thể nằm ở phía identity thay vì phía function: user có `lambda:InvokeFunctionUrl` trong IAM policy của mình thì gọi được Function URL `AWS_IAM` mà function không cần statement nào (mục 16).
+
 **Dự án dùng thế nào** ([`infra/app/function.tf`](../../../infra/app/function.tf), [`infra/app/api.tf`](../../../infra/app/api.tf)):
 
-- Execution role `geolife-api`: `s3:GetObject` trên `data/serving/*` và `models/geolife_home_office/*`; `s3:ListBucket` có điều kiện `s3:prefix` trên hai prefix đó (thiếu quyền này S3 trả `403` thay vì `404` cho file không tồn tại, xem [serving_data.md](serving_data.md)); ghi log vào log group của function.
+- Execution role `geolife-api`: `s3:GetObject` trên `data/serving/*` và `models/geolife_home_office/*`; `s3:ListBucket` có điều kiện `s3:prefix` trên hai prefix đó (mục 3); ghi log vào log group của function.
 - Permission `apigw-invoke-live`: principal API Gateway, `source_arn = <execution_arn>/*`, qualifier `live`.
 
-## 7. HTTP API: route, integration, stage
+## 10. HTTP API: route, integration, stage
 
 **Là gì.**
 
@@ -227,9 +275,9 @@ Stage tên `$default` cho URL không có tiền tố stage: `https://<api-id>.ex
 
 **Ngoại lệ đã gặp.** Method `TRACE` không bao giờ tới Lambda: HTTP API tự trả `405` (body HTML, không có header `Allow`). Test contract (schemathesis) bỏ check `unsupported_method` cho đúng trường hợp này.
 
-**Access log.** Mỗi request một dòng JSON ở log group `/aws/apigateway/geolife-api`, gồm `status`, `latencyMs` (`$context.responseLatency`: tổng thời gian ở API Gateway), `integrationMs` (`$context.integrationLatency`: thời gian chờ Lambda), `integrationError` (lỗi khi gọi Lambda, vd. thiếu permission) và `lambdaRequestId` để nối sang log của function. Request bị chặn ở API Gateway (429, 405) chỉ có ở log này, không có ở log của function.
+**Access log.** Mỗi request một dòng JSON ở log group `/aws/apigateway/geolife-api`, gồm `status`, `latencyMs` (`$context.responseLatency`: tổng thời gian ở API Gateway), `integrationMs` (`$context.integrationLatency`: thời gian chờ Lambda), `integrationError` (lỗi khi gọi Lambda, vd. thiếu permission) và `lambdaRequestId` để nối sang log của function. Request bị chặn ở API Gateway (429, 405) chỉ có ở log này, không có ở log của function. Access log có thể tới CloudWatch trễ hơn một phút sau request.
 
-## 8. Throttling của stage
+## 11. Throttling của stage
 
 **Là gì.** Thuật toán token bucket: xô chứa tối đa `burst` token, được nạp `rate` token mỗi giây; mỗi request lấy một token, xô rỗng thì API Gateway trả `429 Too Many Requests` mà không gọi Lambda.
 
@@ -239,13 +287,15 @@ Stage tên `$default` cho URL không có tiền tố stage: `https://<api-id>.ex
 
 **Dự án dùng thế nào.** Stage `$default`: `throttle_rate = 10`, `throttle_burst = 20` (biến Terraform, nâng lên khi load test). Mỗi tài khoản còn một giới hạn chung cho mọi API trong region, cao hơn nhiều so với giá trị này.
 
-## 9. Reserved concurrency
+## 12. Reserved concurrency
 
 **Là gì.** Concurrency là số environment đang xử lý request cùng lúc. Tài khoản có một hạn mức chung cho cả region (tài khoản này: 1 000). Reserved concurrency của một function vừa **giữ chỗ** (function khác không lấy được phần đó) vừa là **trần** (function không vượt quá).
 
 Ước lượng concurrency cần: **concurrency ≈ số request mỗi giây × thời gian một request**. Ví dụ request của user 153 mất khoảng 4,5 giây; trần 10 thì chịu được khoảng 2 request user 153 mỗi giây.
 
 **Vì sao cần.** Throttling của stage giới hạn số request mỗi giây, nhưng request dài vẫn có thể chồng lên nhau. Reserved concurrency giới hạn số environment chạy cùng lúc, tức trần GB-giây bị tính tiền mỗi giây. Request vượt trần bị Lambda từ chối ngay, không chạy code.
+
+Trần tính chung cho mọi version của function: khi đang canary, environment của cả hai version cộng lại không vượt trần.
 
 **Reserved concurrency = 0** là cách tạm dừng function: mọi request bị từ chối, HTTP API trả `503 {"message":"Service Unavailable"}`.
 
@@ -254,13 +304,13 @@ Stage tên `$default` cho URL không có tiền tố stage: `https://<api-id>.ex
 - `api_reserved_concurrency = 10`.
 - `make aws-pause` đặt về 0 bằng `aws lambda put-function-concurrency` (có hiệu lực ngay), đồng thời ghi `paused = true` vào `infra/app/pause.auto.tfvars` (không commit) để lần `terraform apply` sau không bật lại. `make aws-resume` làm ngược lại.
 
-## 10. Đọc log của function
+## 13. Đọc log của function
 
-**Là gì.** Function đặt `logging_config.log_format = "JSON"`: mỗi dòng log là một object JSON, gồm log của code (`logging` của Python, kèm các trường `extra`) và các dòng `platform.*` của Lambda.
+**Là gì.** Function đặt `logging_config.log_format = "JSON"`: mỗi dòng log là một object JSON, gồm log của code (`logging` của Python, kèm các trường `extra`) và các dòng `platform.*` của Lambda. Mỗi environment ghi vào một log stream riêng, tên có dạng `2026/11/26/geolife-api[8]<id>`: số trong ngoặc vuông là Lambda version của environment.
 
 | Dòng | Trường cần đọc | Dùng để |
 | --- | --- | --- |
-| `platform.report` | `durationMs`, `billedDurationMs`, `maxMemoryUsedMB`, `initDurationMs` (chỉ request đầu) | Thời gian request, RAM, cold start |
+| `platform.report` | `requestId`, `durationMs`, `billedDurationMs`, `maxMemoryUsedMB`, `initDurationMs` (chỉ request đầu) | Thời gian request, RAM, cold start |
 | `platform.initReport` | `status` (`success`, `error`, `timeout`), `phase` | Phát hiện init quá trần 10 giây |
 | Log của handler | `importS`, `initS`, `modelReady`, `downloadS`, `loadS`, `warmUpS`, `modelWaitS` | Tách thời gian từng phần của pha init |
 
@@ -272,17 +322,98 @@ fields @timestamp, @logStream
 | sort @timestamp desc
 ```
 
-**Dự án dùng thế nào.** [`scripts/measure_lambda_latency.py`](../../../scripts/measure_lambda_latency.py) gửi request rồi đọc đúng các dòng trên trong khoảng thời gian đó (`filter_log_events`, chờ 20 giây vì log tới CloudWatch trễ vài giây). Log group `/aws/lambda/geolife-api` tạo bằng Terraform trước function để đặt được retention (30 ngày); nếu để Lambda tự tạo, log giữ vô thời hạn.
+**Dự án dùng thế nào.** [`scripts/measure_lambda_latency.py`](../../../scripts/measure_lambda_latency.py) gửi request rồi đọc các dòng trên trong khoảng thời gian đó (`filter_log_events`). [`scripts/canary_check.py`](../../../scripts/canary_check.py) lấy Lambda version của từng request từ tên log stream chứa dòng `platform.report` của nó. Log group `/aws/lambda/geolife-api` tạo bằng Terraform trước function để đặt được retention (30 ngày); nếu để Lambda tự tạo, log giữ vô thời hạn.
 
 ---
 
-# Phần C. Cold start và tối ưu
+# Phần D. Canary
 
-## 11. Cold start gồm những gì
+## 14. Alias có trọng số
+
+**Là gì.** Một alias trỏ tới một version chính (`function_version`) và có thể thêm **một** version phụ với trọng số (`routing_config.additional_version_weights = { "8" = 0.2 }`). Mỗi lần gọi alias, Lambda chọn ngẫu nhiên: 20% vào version 8, 80% vào version chính.
+
+**Vì sao cần.** Đây là canary không cần load balancer: cùng một URL, cùng một alias, một phần traffic chạy version mới. Đổi trọng số là một lời gọi `UpdateAlias`, có hiệu lực trong vài giây; trọng số về 0 (hay bỏ `routing_config`) là cắt traffic tới version mới ngay.
+
+**Ràng buộc:**
+
+- Tối đa hai version; cả hai phải là version đã publish (không dùng `$LATEST`).
+- Chia theo **từng lần gọi**, không theo user: cùng một user có thể nhận kết quả của hai version ở hai lần gọi.
+- Trọng số áp dụng trên số lần gọi, không phải trên tổng thời gian chạy hay số environment.
+
+**Ví dụ.**
+
+```bash
+aws lambda get-alias --function-name geolife-api --name live --query '{v:FunctionVersion,r:RoutingConfig}'
+```
+
+```json
+{"v": "9", "r": {"AdditionalVersionWeights": {"8": 0.2}}}
+```
+
+**Dự án dùng thế nào.** `aws_lambda_alias.live` có khối `routing_config` động: chỉ có khi alias `challenger` trỏ version khác `live` và `canary_weight > 0` ([config_relation.md](config_relation.md) mục 6).
+
+## 15. Metric theo `ExecutedVersion`
+
+**Là gì.** Lambda gửi metric (`Invocations`, `Errors`, `Duration`, `Throttles`, `ConcurrentExecutions`…) vào namespace `AWS/Lambda`. Khi gọi qua alias, mỗi metric có thêm bộ dimension `FunctionName`, `Resource = <function>:<alias>`, `ExecutedVersion = <version thực sự chạy>`.
+
+**Vì sao cần.** Alias chia ngẫu nhiên, nên muốn biết mỗi version nhận bao nhiêu request, lỗi bao nhiêu, chậm bao nhiêu thì phải tách theo version đã thực thi, không theo alias.
+
+**Ví dụ.** Số lần gọi mỗi phút của alias `live`, tách theo version:
+
+```bash
+aws cloudwatch get-metric-statistics --namespace AWS/Lambda --metric-name Invocations \
+  --dimensions Name=FunctionName,Value=geolife-api Name=Resource,Value=geolife-api:live Name=ExecutedVersion,Value=7 \
+  --start-time 2026-11-26T01:05:00Z --end-time 2026-11-26T01:30:00Z --period 60 --statistics Sum
+```
+
+`aws cloudwatch get-metric-widget-image` vẽ cùng metric thành PNG mà không cần mở console.
+
+**Giới hạn.** `Errors` chỉ đếm lỗi của function (exception không bắt, timeout, hết RAM). Response `500` do FastAPI trả có định dạng là một lần gọi thành công với Lambda, nên không nằm trong `Errors`; muốn đếm `5xx` theo version phải ghép response với log (mục 13, [deploy_strategies.md](deploy_strategies.md) mục 6).
+
+**Dự án dùng thế nào.** Ảnh metric của lần canary v1 → v3 ở [deploy_strategies.md](deploy_strategies.md) mục 7.
+
+## 16. Function URL, `AWS_IAM` và SigV4
+
+**Là gì.** Function URL là một endpoint HTTPS gắn thẳng vào function hoặc một alias (`https://<id>.lambda-url.<region>.on.aws/`), không qua API Gateway. Có hai chế độ xác thực:
+
+| `authorization_type` | Ai gọi được |
+| --- | --- |
+| `NONE` | Bất kỳ ai có URL (cần thêm resource-based policy cho principal `*`) |
+| `AWS_IAM` | Request phải được ký **SigV4** bằng credential AWS có quyền `lambda:InvokeFunctionUrl` trên function |
+
+**SigV4** là cách ký request của AWS: client dùng secret key tính chữ ký trên method, path, header, body và thời điểm, gửi kèm trong header `Authorization`. Server kiểm chữ ký bằng cùng secret; không có secret thì không tạo được chữ ký hợp lệ. Credential tạm (SSO, `aws login`, assume role) cần thêm header `x-amz-security-token`.
+
+**Vì sao cần.** Muốn gọi thẳng version mới (trước khi nó nhận traffic, hoặc để so với version cũ) mà không qua chia ngẫu nhiên của `live`, và không mở thêm một URL công khai.
+
+**Ví dụ.** `curl` có sẵn chức năng ký:
+
+```bash
+eval "$(aws configure export-credentials --format env)"
+curl --aws-sigv4 "aws:amz:ap-southeast-1:lambda" --user "$AWS_ACCESS_KEY_ID:$AWS_SECRET_ACCESS_KEY" \
+  -H "x-amz-security-token: $AWS_SESSION_TOKEN" -X POST "<challenger_url>/v1/users/5/predictions"
+```
+
+Gọi không ký thì nhận `403`.
+
+**Dự án dùng thế nào.** Function URL gắn vào alias `challenger`; `make aws-call-challenger P=<path> [M=GET]` chạy đúng lệnh trên với credential của profile đang dùng.
+
+## 17. So latency giữa hai version phải tách cold start
+
+**Là gì.** Mỗi version có environment riêng; mỗi environment mới mất 9–13 giây cho request đầu ([sizing.md](sizing.md) L8), trong khi request khi ấm của user trung vị mất khoảng 0,4 giây.
+
+**Vì sao cần.** Version mới nhận ít traffic hơn (20%), nên tỉ lệ request có cold start của nó cao hơn version cũ. Ví dụ 100 request tuần tự: version cũ có 1 cold start trên 80 request, version mới có 1 trên 20. Một request 10 giây trong 20 request đủ đẩy p95 của version mới lên gần 10 giây; so p95 gộp thì version mới luôn thua, dù khi ấm hai version ngang nhau.
+
+**Dự án dùng thế nào.** Handler gắn `X-Cold-Start: 1` vào response đầu tiên của mỗi environment. `canary_check` bỏ các response đó khi tính p50 / p95, và báo số cold start của từng version thành một cột riêng.
+
+---
+
+# Phần E. Cold start và tối ưu
+
+## 18. Cold start gồm những gì
 
 **Là gì.** Cold start là thời gian request phải chờ một environment mới chạy xong pha init. Nó xảy ra ở request đầu tiên sau khi alias chuyển sang version mới, khi số request đồng thời tăng vượt số environment đang có, hoặc sau một thời gian không có request.
 
-**Số đo trên Lambda** (2 048 MB, [sizing.md](sizing.md) L6):
+**Số đo trên Lambda** (1 769–3 008 MB, [sizing.md](sizing.md) L6):
 
 | Phần | Thời gian | Thuộc về |
 | --- | --- | --- |
@@ -298,7 +429,7 @@ Hai điều rút ra khi tối ưu:
 - **Khoảng 6–7 trên 9 giây là import Python**, không phải dữ liệu. Tải model chỉ khoảng 1 giây.
 - **Thêm RAM không giúp.** 1 769 / 2 048 / 3 008 MB cho cùng thời gian init: import chạy trên một luồng, và phần lớn là đọc file thư viện từ image.
 
-## 12. Trần 10 giây của pha init
+## 19. Trần 10 giây của pha init
 
 **Là gì.** Function on-demand có pha init tối đa 10 giây. Quá trần, Lambda dừng init đó, rồi khi có request thì **chạy lại toàn bộ init bên trong pha invoke của request đó**. Lần chạy lại tính vào timeout của function (29 giây) và tính tiền như thời gian invoke.
 
@@ -312,9 +443,9 @@ Image vừa push lần đầu: [init 10 s → bị dừng][init lại > 29 s →
 
 Lần init lại nhanh hơn lần đầu (6–7 giây) vì file của image đã được đọc và cache một lần.
 
-**Ví dụ (L2.1).** Ở 2 048 MB, lần đo thứ nhất có 3 trên 6 environment quá trần, client chờ 17,3–18,4 giây; lần đo thứ hai cùng cấu hình thì 0 trên 6. Vì init dao động sát trần, không có mức RAM nào tránh chắc chắn được.
+**Ví dụ.** Ở 2 048 MB, cùng một cấu hình, một lần đo có 3 trên 6 environment quá trần, lần sau 0 trên 6 ([sizing.md](sizing.md) L6): init dao động sát trần nên không mức RAM nào tránh chắc chắn được.
 
-## 13. Init có hạn giờ
+## 20. Init có hạn giờ
 
 **Ý tưởng.** Không để việc nạp model quyết định lúc pha init kết thúc. Pha init tự kết thúc trước trần; phần nạp model còn dở được chuyển sang request đầu tiên.
 
@@ -338,17 +469,17 @@ Request đầu tiên:                                                           
 
 **Chọn hạn 8,5 giây.** Hạn tính từ lúc import module handler. Cộng khoảng 0,3 giây trước đó (khởi động Python, `awslambdaric`) là khoảng 8,8 giây, còn dư hơn 1 giây so với trần cho dao động giữa các lần init. Hạn đặt qua biến môi trường `INIT_BUDGET_S`.
 
-**Kết quả đo** ([sizing.md](sizing.md) L8): 10 environment mới, không init nào quá trần, kể cả lần đầu Lambda chạy image vừa push. `initDurationMs` 8,45–8,88 giây; request đầu chờ model thêm 0,45–3,2 giây; client chờ 9–13 giây thay vì 17–18 giây.
+**Kết quả đo** ([sizing.md](sizing.md) L8): không init nào quá trần, kể cả lần đầu chạy image vừa push; client chờ 9–13 giây thay vì 17–18 giây.
 
-**Giới hạn.** Cách này không làm cold start ngắn hơn tổng thời gian import và nạp model (khoảng 10 giây); nó chỉ loại bỏ trường hợp init hai lần. Muốn ngắn hơn thì xem mục 14.
+**Giới hạn.** Cách này không làm cold start ngắn hơn tổng thời gian import và nạp model (khoảng 10 giây); nó chỉ loại bỏ trường hợp init hai lần. Muốn ngắn hơn thì xem mục 21.
 
 **Dự án dùng thế nào.** `ModelLoader` và `_init()` trong [`src/geolife_api/lambda_handlers.py`](../../../src/geolife_api/lambda_handlers.py); test ở [`tests/api/test_lambda_handler.py`](../../../tests/api/test_lambda_handler.py) cho ba trường hợp trên. Log của handler có `modelReady` (model xong trong hạn hay chưa) và `modelWaitS` (request đầu chờ bao lâu).
 
-## 14. Các cách giảm cold start khác
+## 21. Các cách giảm cold start khác
 
 Đây là các hướng khi cần cold start ngắn hơn khoảng 10 giây. Mỗi hướng ghi: làm gì, được gì theo số đo hiện có, cái giá.
 
-### 14.1 Giảm thời gian import
+### 21.1 Giảm thời gian import
 
 **Làm gì.** Đo module nào import chậm, ngay trong image (để giống điều kiện trên Lambda):
 
@@ -366,7 +497,7 @@ Mỗi dòng của `importtime.log` có thời gian riêng (`self`) và thời gi
 
 **Được gì.** Import chiếm khoảng 6–7 giây trên Lambda, nên đây là hướng có tiềm năng lớn nhất; cần đo `-X importtime` trước để biết con số cụ thể.
 
-### 14.2 Đóng model vào image
+### 21.2 Đóng model vào image
 
 **Làm gì.** Copy thư mục MLflow model vào image lúc build thay vì tải từ S3 ở pha init.
 
@@ -374,7 +505,7 @@ Mỗi dòng của `importtime.log` có thời gian riêng (`self`) và thời gi
 
 **Cái giá.** Mỗi registry version cần một image riêng. Promote phải build và push image mới thay vì chỉ đổi `MODEL_URI`; image không còn dùng chung cho mọi model version. Với số đo hiện tại, cái giá lớn hơn lợi ích.
 
-### 14.3 Provisioned concurrency
+### 21.3 Provisioned concurrency
 
 **Là gì.** Lambda giữ sẵn N environment đã init xong cho một version hoặc alias. Request rơi vào các environment này không có cold start.
 
@@ -387,17 +518,17 @@ Mỗi dòng của `importtime.log` có thời gian riêng (`self`) và thời gi
 
 **Khi nào dùng.** Khi cần chắc chắn không có cold start trong một khoảng thời gian ngắn (demo, load test).
 
-### 14.4 Những cách không áp dụng được
+### 21.4 Những cách không áp dụng được
 
 | Cách | Vì sao không |
 | --- | --- |
 | Tăng RAM để có thêm CPU | Đã đo: 1 769 / 2 048 / 3 008 MB cho cùng thời gian init (L6) |
-| SnapStart (chụp environment sau init, khôi phục thay vì init lại) | Với Python, SnapStart chỉ hỗ trợ function dạng gói zip trên managed runtime, không hỗ trợ container image; thư viện của API vượt giới hạn 250 MB của gói zip (mục 3) |
+| SnapStart (chụp environment sau init, khôi phục thay vì init lại) | Với Python, SnapStart chỉ hỗ trợ function dạng gói zip trên managed runtime, không hỗ trợ container image; thư viện của API vượt giới hạn 250 MB của gói zip (mục 6) |
 | Gọi function định kỳ để "giữ ấm" | Chỉ giữ được số environment bằng số lần gọi đồng thời; không giúp khi alias đổi version hay khi tải tăng; vẫn là cold start với request vượt số đó |
 
-### 14.5 Quy trình khi tối ưu
+### 21.5 Quy trình khi tối ưu
 
 1. Đo hiện trạng: `uv run python scripts/measure_lambda_latency.py --url $(make -s aws-url)` ngay sau khi alias chuyển sang version mới (pha cold start chỉ đo được lúc này).
-2. Xác định phần lớn nhất trong bảng ở mục 11 (log `importS`, `downloadS`, `loadS`, `warmUpS`).
+2. Xác định phần lớn nhất trong bảng ở mục 18 (log `importS`, `downloadS`, `loadS`, `warmUpS`).
 3. Với import: đo `-X importtime` trong image, sửa, đo lại ở local trước khi push.
 4. Deploy, đo lại bằng bước 1, ghi số vào [sizing.md](sizing.md).
