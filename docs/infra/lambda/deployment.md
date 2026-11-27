@@ -57,6 +57,20 @@ Hộp 5 cho thấy Lambda đóng hộp theo thay đổi của `$LATEST`, không 
 
 [`scripts/promote.py`](../../../scripts/promote.py) đưa alias trên registry ra function. Registry quyết định *model nào* đóng vai gì; promote quyết định *hộp nào* mang nhãn nào.
 
+**Thao tác, từ registry tới AWS:**
+
+| # | Ở đâu | Làm gì |
+| --- | --- | --- |
+| 0 | Máy dev | `aws login --profile geolife-dev`; `.env` có biến Databricks / MLflow (`MLFLOW_REGISTRY_URI`, `MLFLOW_MODEL_NAME`) |
+| 1 | Databricks, Catalog Explorer → model `geolife_home_office` → version → *Add alias* | Gắn `champion` cho version chạy thật, `challenger` cho version muốn thử. AWS chưa đổi gì: function không gọi registry, registry chỉ được đọc từ máy dev lúc promote |
+| 2 | `infra/app/canary.auto.tfvars` (tuỳ chọn) | Đặt `canary_weight`: 20 mặc định; 0 để gọi thử version mới trước khi nó nhận traffic |
+| 3 | Máy dev | `make aws-promote`. Mỗi `terraform apply` in plan và hỏi `yes` (2–4 lần mỗi promote); `ARGS=--auto-approve` bỏ bước hỏi |
+| 4 | Máy dev | Kiểm theo mục 6: `make aws-call-challenger P=/v1/health M=GET`, `make aws-canary-check` |
+| 5 | Git | Commit `infra/app/models.auto.tfvars.json`: trạng thái mong muốn của hai nhãn, lần promote sau đọc lại |
+| 6 | Databricks, rồi `make aws-promote` | Chốt: `champion` sang version mới, xoá `challenger`. Huỷ: xoá `challenger`. Cắt traffic ngay mà chưa đổi registry: `canary_weight = 0`, `make aws-deploy` ([`deploy_strategies.md`](deploy_strategies.md) mục 4) |
+
+**Bên trong `make aws-promote`:**
+
 ```mermaid
 sequenceDiagram
   participant P as promote.py
@@ -82,11 +96,11 @@ sequenceDiagram
 **Các bước:**
 
 1. Đọc `@champion` và `@challenger` thành số version. Không có `@champion` thì dừng, AWS giữ nguyên. `@challenger` trùng `@champion` coi như không có. `ARGS=--champion-only` bỏ qua `@challenger`.
-2. Version nào chưa có `manifest.json` trên S3 thì phát hành (`geolife.publish`).
+2. Version nào chưa có `manifest.json` trên S3 thì phát hành (`geolife.publish`): tải thư mục MLflow model từ registry về máy dev, upload từng file lên `models/geolife_home_office/v=<n>/model/`, ghi `manifest.json` sau cùng bằng conditional write (không ghi đè), gắn tag `s3_uri` cho version trên registry.
 3. `terraform apply` để `$LATEST` khớp code Terraform hiện tại (image mới nhất trong ECR, RAM, timeout…). Cấu hình đổi thì Lambda đóng một hộp.
 4. **Nhãn `live` theo `@champion`.** Tìm hộp có cùng cấu hình với `$LATEST` (so mọi thứ trừ `MODEL_URI`) và chứa model của `@champion`, theo thứ tự: hộp đang mang `live` → hộp đang mang `challenger` → hộp mới nhất còn lại. Không có thì đóng hộp mới: đặt `latest_model_version` trong tfvars rồi apply.
 5. **Nhãn `challenger`.** Không có `@challenger`: dán lên hộp của `live`, `live` nhận 100%. Có: tìm hoặc đóng hộp như bước 4; `live` chia `canary_weight` % sang hộp này.
-6. Ghi hai nhãn vào `models.auto.tfvars.json`, apply.
+6. Ghi hai nhãn vào `models.auto.tfvars.json`, apply: Terraform gọi `UpdateAlias` cho `live` (`FunctionVersion`, `AdditionalVersionWeights`) và `challenger`. Alias đổi trong vài giây; request đầu tới hộp mới có cold start.
 
 **Vì sao so cả cấu hình, không chỉ image và model.** Đổi RAM hay timeout cũng phải tới được traffic thật. Nếu chỉ so image và model, promote sẽ dùng lại hộp cũ với RAM cũ.
 
@@ -134,3 +148,18 @@ Không stack nào phải huỷ sau mỗi phiên: khi không có request, functio
 | Nhãn đang dán đúng hộp | `aws lambda get-alias --function-name geolife-api --name live` | `FunctionVersion` và `RoutingConfig` khớp `models.auto.tfvars.json`, `canary_weight` |
 | Version mới chạy được trước khi nhận traffic | `make aws-call-challenger P=/v1/health M=GET` | `200`; `x-cold-start: 1` ở lần gọi đầu |
 | Tỉ lệ chia, lỗi, latency theo hộp | `make aws-canary-check` | [`deploy_strategies.md`](deploy_strategies.md) mục 6 |
+
+## 7. Lưu ở đâu trên AWS
+
+| Thứ | Nơi lưu | Đặc điểm |
+| --- | --- | --- |
+| Model (registry version n) | S3 `geolife-<account_id>-artifacts/models/geolife_home_office/v=<n>/model/` + `manifest.json` | Bản sao bất biến của registry; có manifest mới coi là đã phát hành |
+| Dữ liệu điểm | S3 `…/data/serving/v_1/points/user=<id>.parquet` | Đọc ở mỗi request ([`serving_data.md`](serving_data.md)) |
+| Code | ECR `geolife-api:<git-sha>` | Tag không ghi đè; giữ 5 image có tag gần nhất; function ghim theo digest |
+| `$LATEST` | Cấu hình của function `geolife-api` trong dịch vụ Lambda | Image (digest), RAM, timeout, `MODEL_URI`, `POINTS_URI` |
+| Hộp (Lambda version) | Dịch vụ Lambda | Bản chụp bất biến của `$LATEST`. Hộp chứa *địa chỉ* model (`MODEL_URI`), không chứa file model |
+| Nhãn `live`, `challenger` | Dịch vụ Lambda | Con trỏ tới hộp; `live` có thêm `RoutingConfig` (trọng số) |
+| Trạng thái mong muốn | Git: `models.auto.tfvars.json`, `canary.auto.tfvars` | Promote hoặc người vận hành sửa |
+| Trạng thái đã tạo | S3 `geolife-<account_id>-tfstate`, key `app/terraform.tfstate` | Terraform so với tfvars để biết cần đổi gì |
+
+Khi một hộp nhận request lần đầu, environment mới khởi động container từ image theo digest của hộp, đọc `MODEL_URI` của hộp, tải model từ S3 và nạp vào RAM một lần cho environment đó; các request sau chỉ đọc file parquet của user ([`request_flow.md`](request_flow.md) bước 3).
